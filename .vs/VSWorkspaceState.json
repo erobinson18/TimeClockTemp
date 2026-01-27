@@ -1,7 +1,8 @@
 {
   "ExpandedNodes": [
-    ""
+    "",
+    "\\backend"
   ],
-  "SelectedNode": "\\devops",
+  "SelectedNode": "\\backend\\TimeClock",
   "PreviewInSolutionExplorer": false
 }
