@@ -1,3 +1,9 @@
 <Solution>
+  <Project Path="TimeClock.Api/TimeClock.Api.csproj" Id="e54c6007-6743-419d-94fc-bd435349c9ba" />
+  <Project Path="TimeClock.Application/TimeClock.Application.csproj" Id="c33fc91c-8620-45f6-b7f1-20e847074ac5" />
+  <Project Path="TimeClock.Domain/TimeClock.Domain.csproj" Id="df1b5583-6c6d-4a81-9ee4-fc12870fddc3" />
+  <Project Path="TimeClock.Infrastructure/TimeClock.Infrastructure.csproj" Id="9feedb3d-9934-4bc7-b480-fd13d184141f" />
+  <Project Path="TimeClock.Sync/TimeClock.Sync.csproj" Id="601b4282-e0dd-4d2e-bdd2-56d8516bf9b3" />
+  <Project Path="TimeClock.Tests/TimeClock.Tests.csproj" Id="fdf0da60-559f-4e20-9867-e885f4544d87" />
   <Project Path="TimeClock/TimeClock.csproj" />
 </Solution>
