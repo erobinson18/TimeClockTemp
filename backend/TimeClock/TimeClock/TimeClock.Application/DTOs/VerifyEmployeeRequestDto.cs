@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace TimeClock.Application.DTOs
+namespace TimeClock.Application.DTOs;
+
+public class VerifyEmployeeRequestDto
 {
-    internal class VerifyEmployeeRequestDto
-    {
-    }
+    public string EmployeeId { get; set; } = string.Empty;
 }
