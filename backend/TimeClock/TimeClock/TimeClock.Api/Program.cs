@@ -7,6 +7,11 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 
 builder.Services.AddControllers();
+builder.Services.AddScoped<IEmployeeVerificationService, EmployeeVerificationService>();
+builder.Services.AddScoped<IEmployeeStatusService, EmployeeStatusService>();
+builder.Services.AddScoped<ITimePunchService, TimePunchService>();
+builder.Services.AddScoped<IPunchSyncService, PunchSyncService>();
+
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -16,6 +21,7 @@ builder.Services.AddInfrastructure(conn);
 
 // Application
 builder.Services.AddScoped<ITimePunchService, TimePunchService>();
+
 
 var app = builder.Build();
 

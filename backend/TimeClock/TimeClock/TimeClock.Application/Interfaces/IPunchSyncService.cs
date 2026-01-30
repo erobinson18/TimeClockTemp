@@ -4,11 +4,10 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using TimeClock.Application.DTOs;
-using TimeClock.Application.Services;
 
 namespace TimeClock.Application.Interfaces;
 
-public interface IEmployeeStatusService
+public interface IPunchSyncService
 {
-    Task<EmployeeStatusDto> GetStatusAsync(Guid employeeId);
+    Task<int> SyncAsync(SyncPunchBatchDto batch);
 }
