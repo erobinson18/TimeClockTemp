@@ -15,7 +15,8 @@ public record CreateTimePunchCommand
     DeviceType DeviceType,
     string DeviceId,
     long LocalSequenceNumber,
-    GeoCoordinate? Location
+    GeoCoordinate? Location,
+    DateTime TimestampUtc
 );
 
 internal class CreatePunchCommand

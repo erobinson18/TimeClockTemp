@@ -9,6 +9,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddScoped<IEmployeeVerificationService, EmployeeVerificationService>();
 builder.Services.AddScoped<IEmployeeStatusService, EmployeeStatusService>();
+builder.Services.AddScoped<ITimePunchService, TimePunchService>();
+builder.Services.AddScoped<IPunchSyncService, PunchSyncService>();
 
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
