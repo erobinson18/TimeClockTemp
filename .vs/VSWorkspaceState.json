@@ -1,7 +1,16 @@
 {
   "ExpandedNodes": [
-    ""
+    "",
+    "\\backend",
+    "\\backend\\TimeClock",
+    "\\backend\\TimeClock\\TimeClock",
+    "\\backend\\TimeClock\\TimeClock\\TimeClock.Api",
+    "\\backend\\TimeClock\\TimeClock\\TimeClock.Application",
+    "\\backend\\TimeClock\\TimeClock\\TimeClock.Domain",
+    "\\backend\\TimeClock\\TimeClock\\TimeClock.Infrastructure",
+    "\\backend\\TimeClock\\TimeClock\\TimeClock.Sync",
+    "\\backend\\TimeClock\\TimeClock\\TimeClock.Tests"
   ],
-  "SelectedNode": "\\TimeClock.slnx",
+  "SelectedNode": "\\backend\\TimeClock\\TimeClock\\TimeClock.Api\\appsettings.json",
   "PreviewInSolutionExplorer": false
 }

@@ -43,10 +43,12 @@ public class PunchController : ControllerBase
             request.DeviceType,
             request.DeviceId,
             request.LocalSequenceNumber,
-            location
+            location,
+            DateTime.UtcNow
         );
 
         await _service.CreateAsync(cmd);
+
         return Ok(new { success = true });
     }
 }

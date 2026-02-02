@@ -8,7 +8,7 @@ using TimeClock.Application.Services;
 
 namespace TimeClock.Application.Interfaces;
 
-public interface IEmployeeStatusService
+public interface IEmployeeVerificationService
 {
-    Task<EmployeeStatusDto> GetStatusAsync(Guid employeeId);
+    Task<VerifyEmployeeResultDto> VerifyAsync(VerifyEmployeeRequestDto request);
 }

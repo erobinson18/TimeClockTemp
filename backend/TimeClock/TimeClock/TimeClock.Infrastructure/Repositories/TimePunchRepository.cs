@@ -22,4 +22,13 @@ public class TimePunchRepository : ITimePunchRepository
         _db.TimePunches.Add(punch);
         await _db.SaveChangesAsync();
     }
+
+    public async Task<TimePunch?> GetLatestByEmployeeIdAsync(Guid employeeId)
+    {
+        return await _db.TimePunches
+            .Where(p => p.EmployeeId == employeeId)
+            .OrderByDescending(p => p.TimestampUtc)
+            .ThenByDescending(p => p.LocalSequenceNumber)
+            .FirstOrDefaultAsync();
+    }
 }

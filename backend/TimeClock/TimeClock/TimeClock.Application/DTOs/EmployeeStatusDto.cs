@@ -4,9 +4,10 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace TimeClock.Application.DTOs
+namespace TimeClock.Application.DTOs;
+
+public class EmployeeStatusDto
 {
-    internal class EmployeeStatusDto
-    {
-    }
+    public Guid EmployeeId { get; set; }
+    public bool IsClockedIn { get; set; }
 }
