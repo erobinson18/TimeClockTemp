@@ -11,6 +11,6 @@
     "\\backend\\TimeClock\\TimeClock\\TimeClock.Sync",
     "\\backend\\TimeClock\\TimeClock\\TimeClock.Tests"
   ],
-  "SelectedNode": "\\backend\\TimeClock\\TimeClock\\TimeClock.Api\\appsettings.json",
+  "SelectedNode": "\\backend\\TimeClock\\TimeClock\\TimeClock.Api\\Program.cs",
   "PreviewInSolutionExplorer": false
 }
