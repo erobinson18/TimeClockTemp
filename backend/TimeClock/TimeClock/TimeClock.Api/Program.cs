@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc.ModelBinding.Binders;
 using TimeClock.Application.Interfaces;
 using TimeClock.Application.Services;
 using TimeClock.Infrastructure;
@@ -11,6 +12,16 @@ builder.Services.AddScoped<IEmployeeVerificationService, EmployeeVerificationSer
 builder.Services.AddScoped<IEmployeeStatusService, EmployeeStatusService>();
 builder.Services.AddScoped<ITimePunchService, TimePunchService>();
 builder.Services.AddScoped<IPunchSyncService, PunchSyncService>();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("DevCors", policy =>
+    {
+        policy
+        .AllowAnyOrigin()
+        .AllowAnyMethod()
+        .AllowAnyHeader();
+    });
+});
 
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
@@ -24,6 +35,7 @@ builder.Services.AddScoped<ITimePunchService, TimePunchService>();
 
 
 var app = builder.Build();
+app.UseCors("DevCors");
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -31,6 +43,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+app.UseCors("DevCors");
 
 app.UseHttpsRedirection();
 
