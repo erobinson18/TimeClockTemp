@@ -6,7 +6,7 @@ namespace TimeClock.Api.Controllers;
 
 [ApiController]
 [Route("api/status")]
-public class StatusController
+public class StatusController : ControllerBase
 {
     private readonly IEmployeeStatusService _service;
     public StatusController(IEmployeeStatusService service)
@@ -22,8 +22,4 @@ public class StatusController
         return Ok(result);
     }
 
-    private IActionResult Ok(EmployeeStatusDto result)
-    {
-        throw new NotImplementedException();
-    }
 }

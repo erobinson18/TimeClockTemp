@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc.ModelBinding.Binders;
 using TimeClock.Application.Interfaces;
 using TimeClock.Application.Services;
 using TimeClock.Infrastructure;
@@ -11,6 +12,18 @@ builder.Services.AddScoped<IEmployeeVerificationService, EmployeeVerificationSer
 builder.Services.AddScoped<IEmployeeStatusService, EmployeeStatusService>();
 builder.Services.AddScoped<ITimePunchService, TimePunchService>();
 builder.Services.AddScoped<IPunchSyncService, PunchSyncService>();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("FlutterWeb", policy =>
+    {
+        policy
+        .SetIsOriginAllowed(origin =>
+            origin.StartsWith("http://localhost") ||
+            origin.StartsWith("https://localhost:"))
+        .AllowAnyMethod()
+        .AllowAnyHeader();
+    });
+});
 
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
@@ -32,7 +45,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+app.UseCors("FlutterWeb");
+
+//app.UseHttpsRedirection();
 
 app.UseAuthorization();
 
