@@ -14,13 +14,10 @@ builder.Services.AddScoped<ITimePunchService, TimePunchService>();
 builder.Services.AddScoped<IPunchSyncService, PunchSyncService>();
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("DevCors", policy =>
+    options.AddPolicy("FlutterWeb", policy =>
     {
         policy
-        .WithOrigins(
-            "http://localhost:53585", // Flutter web dev server
-            "http://localhost:5160"
-        )
+        .WithOrigins("http://localhost:53585")
         .AllowAnyMethod()
         .AllowAnyHeader();
     });
@@ -40,6 +37,7 @@ builder.Services.AddScoped<ITimePunchService, TimePunchService>();
 var app = builder.Build();
 app.UseCors("DevCors");
 
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -47,7 +45,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseCors("DevCors");
+//app.UseCors("DevCors");
+
+app.UseCors("FlutterWeb");
 
 app.UseHttpsRedirection();
 
