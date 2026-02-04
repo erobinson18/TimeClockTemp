@@ -17,7 +17,10 @@ builder.Services.AddCors(options =>
     options.AddPolicy("DevCors", policy =>
     {
         policy
-        .AllowAnyOrigin()
+        .WithOrigins(
+            "http://localhost:53585", // Flutter web dev server
+            "http://localhost:5160"
+        )
         .AllowAnyMethod()
         .AllowAnyHeader();
     });
