@@ -1,7 +1,7 @@
 import 'package:hive/hive.dart';
 
 class PunchQueue {
-  static const String boxName = "pending_punches";
+  static const String boxName = 'pending_punches';
 
   Future<Box> _box() async => await Hive.openBox(boxName);
 

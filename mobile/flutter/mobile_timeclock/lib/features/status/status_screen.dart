@@ -112,30 +112,28 @@ Future<void> _trySync() async {
     if (!await _isOnline()) return;
 
     final pending = await _queue.all();
-    if (pending.isEmpty) {
-      setState(() => _msg = "No pending punches to sync.");
-      return;
-    }
+    if (pending.isEmpty) return;
 
-    final punches = pending.map((p) => SyncPunchDto(
-      employeeId: p['employeeId'] as String,
-      punchType: p['punchType'] as int,
-      localSequenceNumber: p['localSequenceNumber'] as int,
-      timestampUtc: DateTime.parse(p['timestampUtc'] as String),
-      latitude: p['latitude'] as double?,
-      longitude: p['longitude'] as double?,
-    )).toList();
+    final punches = pending.map((p) => SyncPunch(
+    employeeId: p["employeeId"] as String,
+    punchType: p["punchType"] as int,
+    localSequenceNumber: p["localSequenceNumber"] as int,
+    timestampUtc: DateTime.parse(p["timestampUtc"] as String),
+    latitude: (p["latitude"] as num?)?.toDouble(),
+    longitude: (p["longitude"] as num?)?.toDouble(),
+  )).toList();
 
-    final processed = await _api.syncBatch(SyncBatchRequest(
+    final batch = SyncPunchBatch(
       deviceId: deviceId,
       deviceType: deviceType,
       punches: punches,
-    ));
+    );
 
+    await _api.syncBatch(batch);
     await _queue.clear();
     await _refreshPending();
     await _load();
-    setState(() => _msg = "Synced $processed punches.");
+    setState(() => _msg = "Synced ${punches.length} punches.");
   } catch (e) {
     setState(() => _msg = "Sync failed: $e");
   }

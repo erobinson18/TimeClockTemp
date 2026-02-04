@@ -1,12 +1,34 @@
-class SyncPunchDto {
-  final String employeeId;
-  final int punchType;
+import 'punch.dart';
+
+class SyncPunchBatch {
+  final String deviceId;
+  final int deviceType; // backend expects int (1,2)
+  final List<SyncPunch> punches;
+
+  SyncPunchBatch({
+    required this.deviceId,
+    required this.deviceType,
+    required this.punches,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      "deviceId": deviceId,
+      "deviceType": deviceType,
+      "punches": punches.map((p) => p.toJson()).toList(),
+    };
+  }
+}
+
+class SyncPunch {
+  final String employeeId; // GUID as string
+  final int punchType;     // 1 = in, 2 = out
   final int localSequenceNumber;
   final DateTime timestampUtc;
   final double? latitude;
   final double? longitude;
 
-  SyncPunchDto({
+  SyncPunch({
     required this.employeeId,
     required this.punchType,
     required this.localSequenceNumber,
@@ -15,30 +37,14 @@ class SyncPunchDto {
     this.longitude,
   });
 
-  Map<String, dynamic> toJson() => {
-        'employeeId': employeeId,
-        'punchType': punchType,
-        'localSequenceNumber': localSequenceNumber,
-        'timestampUtc': timestampUtc.toIso8601String(),
-        'latitude': latitude,
-        'longitude': longitude,
-  };
-}
-
-class SyncBatchRequest {
-  final String deviceId;
-  final int deviceType;
-  final List<SyncPunchDto> punches;
-
-  SyncBatchRequest({
-    required this.deviceId,
-    required this.deviceType,
-    required this.punches,
-  });
-
-  Map<String, dynamic> toJson() => {
-        'deviceId': deviceId,
-        'deviceType': deviceType,
-        'punches': punches.map((p) => p.toJson()).toList(),
-      };
+  Map<String, dynamic> toJson() {
+    return {
+      "employeeId": employeeId,
+      "punchType": punchType,
+      "localSequenceNumber": localSequenceNumber,
+      "timestampUtc": timestampUtc.toIso8601String(),
+      "latitude": latitude,
+      "longitude": longitude,
+    };
+  }
 }

@@ -26,7 +26,7 @@ class TimeClockApi {
     await _client.dio.post('/api/punch', data: request.toJson());
   }
 
-  Future<int> syncBatch(SyncBatchRequest batch) async {
+  Future<int> syncBatch(SyncPunchBatch batch) async {
     final res = await _client.dio.post('/api/Sync/batch', data: batch.toJson());
     final map = res.data as Map<String, dynamic>;
     return map['processed'] as int;
