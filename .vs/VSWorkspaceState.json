@@ -4,13 +4,12 @@
     "\\backend",
     "\\backend\\TimeClock",
     "\\backend\\TimeClock\\TimeClock",
-    "\\backend\\TimeClock\\TimeClock\\TimeClock.Api",
-    "\\backend\\TimeClock\\TimeClock\\TimeClock.Application",
     "\\backend\\TimeClock\\TimeClock\\TimeClock.Domain",
     "\\backend\\TimeClock\\TimeClock\\TimeClock.Infrastructure",
     "\\backend\\TimeClock\\TimeClock\\TimeClock.Sync",
-    "\\backend\\TimeClock\\TimeClock\\TimeClock.Tests"
+    "\\backend\\TimeClock\\TimeClock\\TimeClock.Tests",
+    "\\mobile\\flutter",
+    "\\mobile\\flutter\\mobile_timeclock"
   ],
-  "SelectedNode": "\\backend\\TimeClock\\TimeClock\\TimeClock.Api\\appsettings.json",
   "PreviewInSolutionExplorer": false
 }
