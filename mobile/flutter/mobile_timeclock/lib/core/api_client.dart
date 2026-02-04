@@ -11,4 +11,8 @@ class ApiClient {
           receiveTimeout: const Duration(seconds: 15),
           headers: {'Content-Type': 'application/json'},
         ));
+
+    Future<void> ping() async {
+      await dio.get('/api/health/ping');
+    }
 }

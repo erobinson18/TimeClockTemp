@@ -1,5 +1,3 @@
-import 'punch.dart';
-
 class SyncPunchBatch {
   final String deviceId;
   final int deviceType; // backend expects int (1,2)

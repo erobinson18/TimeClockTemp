@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:connectivity_plus/connectivity_plus.dart';
+//import 'package:flutter/foundation.dart' show kIsWeb;
+//import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../core/api_client.dart';
 import '../../data/remote/timeclock_api.dart';
 import '../../data/models/punch.dart';
@@ -27,7 +27,7 @@ class _StatusScreenState extends State<StatusScreen> {
   static const String deviceId = "WEB-TEST-01"; 
   int localSeq = 0;
   final _queue = PunchQueue();
-  final _connectivity = Connectivity();
+  //final _connectivity = Connectivity();
   int _pendingCount = 0;
 
   @override
@@ -60,9 +60,9 @@ class _StatusScreenState extends State<StatusScreen> {
       _loading = true;
     });
 
-      final punchType = _clockedIn ? 2 : 1;
+      final int punchType = _clockedIn ? 2 : 1;
 
-      final seq = localSeq++;
+      final int seq = localSeq;
       localSeq++;
 
       final payload = {
@@ -81,7 +81,7 @@ class _StatusScreenState extends State<StatusScreen> {
               punchType: punchType,
               deviceType: deviceType,
               deviceId: deviceId,
-              localSequenceNumber: payload['localSequenceNumber'] as int,
+              localSequenceNumber: seq,
             ));
             await _load();
           } else {
@@ -97,12 +97,18 @@ class _StatusScreenState extends State<StatusScreen> {
         } finally {
           setState(() => _loading = false);
         }
-        }
+      }
 
   Future<bool> _isOnline() async {
-    if (kIsWeb) return true; // Assume web is always online for this example
-    final result = await _connectivity.checkConnectivity();
-    return result != ConnectivityResult.none;
+    try {
+      await _api.ping(); // cheap GET
+      return true;
+    } catch (_) {
+      return false;
+    }
+    //if (kIsWeb) return true; // Assume web is always online for this example
+    //final result = await _connectivity.checkConnectivity();
+    //return result != ConnectivityResult.none;
   }
 
   Future<void> _refreshPending() async {

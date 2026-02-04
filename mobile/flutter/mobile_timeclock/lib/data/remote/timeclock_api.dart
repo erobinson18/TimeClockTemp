@@ -31,4 +31,8 @@ class TimeClockApi {
     final map = res.data as Map<String, dynamic>;
     return map['processed'] as int;
   }
+
+  Future<void> ping() async {
+    await _client.dio.get('/api/health/ping');
+  }
 }
