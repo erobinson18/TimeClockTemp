@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-//import 'package:flutter/foundation.dart' show kIsWeb;
-//import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../core/api_client.dart';
 import '../../data/remote/timeclock_api.dart';
 import '../../data/models/punch.dart';
@@ -20,6 +20,7 @@ class _StatusScreenState extends State<StatusScreen> {
 
   bool _loading = true;
   bool _clockedIn = false;
+  bool _forceOffline = false;
   String? _msg;
 
   // Adjust later if your enums differ:
@@ -27,7 +28,7 @@ class _StatusScreenState extends State<StatusScreen> {
   static const String deviceId = "WEB-TEST-01"; 
   int localSeq = 0;
   final _queue = PunchQueue();
-  //final _connectivity = Connectivity();
+  final _connectivity = Connectivity();
   int _pendingCount = 0;
 
   @override
@@ -99,17 +100,23 @@ class _StatusScreenState extends State<StatusScreen> {
         }
       }
 
-  Future<bool> _isOnline() async {
+  Future<bool> _isOnline() async {    
+    if (_forceOffline) return false;
+    
     try {
       await _api.ping(); // cheap GET
       return true;
     } catch (_) {
-      return false;
     }
-    //if (kIsWeb) return true; // Assume web is always online for this example
-    //final result = await _connectivity.checkConnectivity();
-    //return result != ConnectivityResult.none;
+
+
+    if (kIsWeb) { // Assume web is always online for this example
+      final result = await _connectivity.checkConnectivity();
+      return result != ConnectivityResult.none;
   }
+
+  return false;
+}
 
   Future<void> _refreshPending() async {
     final c = await _queue.count();
@@ -178,6 +185,14 @@ Future<void> _trySync() async {
                   Text("Employee GUID: ${widget.employeeGuid}"),
                   const SizedBox(height: 12),
                   Text("Pending offline punches: $_pendingCount"),
+                  Row(children: [
+                    const Text("Offline Mode (force queue)"),
+                    Switch(
+                      value: _forceOffline,
+                      onChanged: (v) => setState(() => _forceOffline = v),
+                    ),
+                  ],
+                  ),
                   const SizedBox(height: 10),
                   ElevatedButton(
                     onPressed: _loading ? null : _trySync,
