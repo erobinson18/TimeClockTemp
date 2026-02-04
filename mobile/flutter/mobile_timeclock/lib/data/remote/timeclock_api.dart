@@ -27,7 +27,7 @@ class TimeClockApi {
   }
 
   Future<int> syncBatch(SyncBatchRequest batch) async {
-    final res = await _client.dio.post('/api/sync/batch', data: batch.toJson());
+    final res = await _client.dio.post('/api/Sync/batch', data: batch.toJson());
     final map = res.data as Map<String, dynamic>;
     return map['processed'] as int;
   }

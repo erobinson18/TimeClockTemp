@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../core/api_client.dart';
 import '../../data/remote/timeclock_api.dart';
@@ -89,13 +90,14 @@ class _StatusScreenState extends State<StatusScreen> {
           // if online punch fails, queue it
           await _queue.enqueue(payload);
           await _refreshPending();
-          setState(() => _msg = "Punch failed; queued for sync ($_pendingCount pending).");
+          setState(() => _msg = "Punch failed; queued ($_pendingCount pending). Error: $e");
         } finally {
           setState(() => _loading = false);
         }
         }
 
   Future<bool> _isOnline() async {
+    if (kIsWeb) return true; // Assume web is always online for this example
     final result = await _connectivity.checkConnectivity();
     return result != ConnectivityResult.none;
   }
@@ -105,19 +107,23 @@ class _StatusScreenState extends State<StatusScreen> {
     setState(() => _pendingCount = c);
   }
 
-  Future<void> _trySync() async {
+Future<void> _trySync() async {
+  try {
     if (!await _isOnline()) return;
 
     final pending = await _queue.all();
-    if (pending.isEmpty) return;
+    if (pending.isEmpty) {
+      setState(() => _msg = "No pending punches to sync.");
+      return;
+    }
 
     final punches = pending.map((p) => SyncPunchDto(
-          employeeId: p['employeeId'] as String,
-          punchType: p['punchType'] as int,
-          localSequenceNumber: p['localSequenceNumber'] as int,
-          timestampUtc: DateTime.parse(p['timestampUtc'] as String),
-          latitude: p['latitude'] as double?,
-          longitude: p['longitude'] as double?,
+      employeeId: p['employeeId'] as String,
+      punchType: p['punchType'] as int,
+      localSequenceNumber: p['localSequenceNumber'] as int,
+      timestampUtc: DateTime.parse(p['timestampUtc'] as String),
+      latitude: p['latitude'] as double?,
+      longitude: p['longitude'] as double?,
     )).toList();
 
     final processed = await _api.syncBatch(SyncBatchRequest(
@@ -126,12 +132,14 @@ class _StatusScreenState extends State<StatusScreen> {
       punches: punches,
     ));
 
-    if (processed > 0) {
-      await _queue.clear();
-      await _refreshPending();
-      await _load();
-    }
+    await _queue.clear();
+    await _refreshPending();
+    await _load();
+    setState(() => _msg = "Synced $processed punches.");
+  } catch (e) {
+    setState(() => _msg = "Sync failed: $e");
   }
+}
 
   @override
   Widget build(BuildContext context) {
