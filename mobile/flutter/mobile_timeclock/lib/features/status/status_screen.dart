@@ -23,9 +23,9 @@ class _StatusScreenState extends State<StatusScreen> {
   String? _msg;
 
   // Adjust later if your enums differ:
-  final int deviceType = 1;
-  final String deviceId = "WEB-TEST-01";
-  int localSeq = 1;
+  static const int deviceType = 1; 
+  static const String deviceId = "WEB-TEST-01"; 
+  int localSeq = 0;
   final _queue = PunchQueue();
   final _connectivity = Connectivity();
   int _pendingCount = 0;
@@ -62,10 +62,13 @@ class _StatusScreenState extends State<StatusScreen> {
 
       final punchType = _clockedIn ? 2 : 1;
 
+      final seq = localSeq++;
+      localSeq++;
+
       final payload = {
         'employeeId': widget.employeeGuid,
         'punchType': punchType,
-        'localSeuenceNumber': localSeq++,
+        'localSequenceNumber': seq,
         'timestampUtc': DateTime.now().toUtc().toIso8601String(),
         'latitude': null,
         'longitude': null,
@@ -114,14 +117,20 @@ Future<void> _trySync() async {
     final pending = await _queue.all();
     if (pending.isEmpty) return;
 
-    final punches = pending.map((p) => SyncPunch(
-    employeeId: p["employeeId"] as String,
-    punchType: p["punchType"] as int,
-    localSequenceNumber: p["localSequenceNumber"] as int,
-    timestampUtc: DateTime.parse(p["timestampUtc"] as String),
-    latitude: (p["latitude"] as num?)?.toDouble(),
-    longitude: (p["longitude"] as num?)?.toDouble(),
-  )).toList();
+    final punches = pending.map((p) {
+      final punchType = (p["punchType"] as num?)?.toInt() ?? 0;
+      final localSeq = (p["localSequenceNumber"] as num?)?.toInt() ?? 0;
+      final ts = p["timestampUtc"] as String? ?? DateTime.now().toUtc().toIso8601String();
+
+      return SyncPunch(
+        employeeId: p["employeeId"] as String? ?? widget.employeeGuid,
+        punchType: punchType,
+        localSequenceNumber: localSeq,
+        timestampUtc: DateTime.parse(ts),
+        latitude: (p["latitude"] as num?)?.toDouble(),
+        longitude: (p["longitude"] as num?)?.toDouble(),
+      );
+    }).toList();
 
     final batch = SyncPunchBatch(
       deviceId: deviceId,
@@ -167,6 +176,14 @@ Future<void> _trySync() async {
                   ElevatedButton(
                     onPressed: _loading ? null : _trySync,
                     child: const Text("Sync Now"),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      await _queue.clear();
+                      await _refreshPending();
+                      setState(() => _msg = "Cleared pending punches.");
+                    },
+                    child: const Text("Clear Offline Queue"),
                   ),
                   const SizedBox(height: 10),
                   Text("Status: ${_clockedIn ? "CLOCKED IN" : "CLOCKED OUT"}"),
