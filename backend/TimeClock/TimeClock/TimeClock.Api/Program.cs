@@ -17,7 +17,9 @@ builder.Services.AddCors(options =>
     options.AddPolicy("FlutterWeb", policy =>
     {
         policy
-        .WithOrigins("http://localhost:53585")
+        .SetIsOriginAllowed(origin =>
+            origin.StartsWith("http://localhost") ||
+            origin.StartsWith("https://localhost:"))
         .AllowAnyMethod()
         .AllowAnyHeader();
     });
@@ -35,8 +37,6 @@ builder.Services.AddScoped<ITimePunchService, TimePunchService>();
 
 
 var app = builder.Build();
-app.UseCors("DevCors");
-
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -45,11 +45,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-//app.UseCors("DevCors");
-
 app.UseCors("FlutterWeb");
 
-app.UseHttpsRedirection();
+//app.UseHttpsRedirection();
 
 app.UseAuthorization();
 
