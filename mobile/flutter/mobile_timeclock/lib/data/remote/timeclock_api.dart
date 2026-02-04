@@ -2,6 +2,7 @@ import '../../core/api_client.dart';
 import '../models/verify.dart';
 import '../models/status.dart';
 import '../models/punch.dart';
+import '../models/sync.dart';
 
 class TimeClockApi {
   final ApiClient _client;
@@ -23,5 +24,11 @@ class TimeClockApi {
 
   Future<void> punch(PunchRequest request) async {
     await _client.dio.post('/api/punch', data: request.toJson());
+  }
+
+  Future<int> syncBatch(SyncBatchRequest batch) async {
+    final res = await _client.dio.post('/api/sync/batch', data: batch.toJson());
+    final map = res.data as Map<String, dynamic>;
+    return map['processed'] as int;
   }
 }

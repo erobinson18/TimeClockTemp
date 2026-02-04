@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'features/verify/verify_screen.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
-void main() {
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter();
   runApp(const TimeClockApp());
 }
 
