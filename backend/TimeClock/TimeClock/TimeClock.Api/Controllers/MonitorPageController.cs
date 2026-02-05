@@ -15,20 +15,20 @@ public class MonitorPageController : ControllerBase
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>TimeClock Monitoring</title>
-  <style>
-    body { font-family: system-ui, Arial; margin: 16px; }
-    header { display:flex; gap:16px; align-items:center; justify-content:space-between; }
-    .muted { opacity: 0.7; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; margin: 12px 0; }
-    .card { border: 1px solid #ddd; border-radius: 12px; padding: 10px 12px; min-width: 240px; }
-    .ok { font-weight: 600; }
-    .bad { font-weight: 600; }
-    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-    th, td { text-align:left; padding: 10px 8px; border-bottom: 1px solid #eee; font-size: 14px; }
-    th { background: #fafafa; position: sticky; top: 0; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-    .wrap { max-width: 1280px; }
-  </style>
+<style>
+  body { font-family: system-ui, Arial; margin: 16px; }
+  header { display:flex; gap:16px; align-items:center; justify-content:space-between; }
+  .muted { opacity: 0.7; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; margin: 12px 0; }
+  .card { border: 1px solid #ddd; border-radius: 12px; padding: 10px 12px; min-width: 240px; }
+  .ok { color: #0a7d33; font-weight: 600; }
+  .bad { color: #b00020; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { text-align:left; padding: 10px 8px; border-bottom: 1px solid #eee; font-size: 14px; }
+  th { background: #fafafa; position: sticky; top: 0; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .wrap { max-width: 1280px; }
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -91,20 +91,36 @@ public class MonitorPageController : ControllerBase
     return String(v);
   }
 
+  function punchTypeLabel(v) {
+    if (v === 1) return "CLOCK IN";
+    if (v === 2) return "CLOCK OUT";
+    return fmt(v);
+  }
+
   async function refresh() {
     try {
       const res = await fetch(endpoint, { cache: "no-store" });
       const json = await res.json();
 
-      document.getElementById("status").textContent = res.ok ? "OK" : ("HTTP " + res.status);
-      document.getElementById("status").className = res.ok ? "ok" : "bad";
+      const ok = res.ok;
+      document.getElementById("status").textContent = ok ? "OK" : ("HTTP " + res.status);
+      document.getElementById("status").className = ok ? "ok" : "bad";
 
-      document.getElementById("last").textContent = "Last refresh: " + new Date().toLocaleTimeString();
+      document.getElementById("last").textContent =
+        "Last refresh: " + new Date().toLocaleTimeString();
 
       document.getElementById("serverTime").textContent = fmt(json.serverTimeUtc);
-      document.getElementById("dbReachable").textContent = fmt(json.databaseReachable);
-      document.getElementById("totalPunches").textContent = fmt(json.totals?.totalPunches);
-      document.getElementById("punchesToday").textContent = fmt(json.totals?.punchesTodayUtc);
+
+      const db = json.databaseReachable === true;
+      const dbEl = document.getElementById("dbReachable");
+      dbEl.textContent = db ? "YES" : "NO";
+      dbEl.className = db ? "ok" : "bad";
+
+      document.getElementById("totalPunches").textContent =
+        fmt(json.totals?.totalPunches);
+
+      document.getElementById("punchesToday").textContent =
+        fmt(json.totals?.punchesTodayUtc);
 
       const punches = json.recentPunches || [];
       const tbody = document.getElementById("rows");
@@ -118,7 +134,7 @@ public class MonitorPageController : ControllerBase
         <tr>
           <td>${fmt(p.timestampUtc)}</td>
           <td><code>${fmt(p.employeeId)}</code></td>
-          <td>${fmt(p.punchType)}</td>
+          <td>${punchTypeLabel(p.punchType)}</td>
           <td>${fmt(p.deviceId)} (${fmt(p.deviceType)})</td>
           <td>${fmt(p.localSequenceNumber)}</td>
           <td>${fmt(p.latitude)}</td>
@@ -129,7 +145,8 @@ public class MonitorPageController : ControllerBase
     } catch (e) {
       document.getElementById("status").textContent = "ERROR";
       document.getElementById("status").className = "bad";
-      document.getElementById("rows").innerHTML = "<tr><td colspan='7'>" + fmt(e) + "</td></tr>";
+      document.getElementById("rows").innerHTML =
+        "<tr><td colspan='7'>" + fmt(e) + "</td></tr>";
     }
   }
 
