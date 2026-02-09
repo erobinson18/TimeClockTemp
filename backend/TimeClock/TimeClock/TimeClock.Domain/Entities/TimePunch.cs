@@ -16,7 +16,7 @@ public class TimePunch
     public PunchType PunchType { get; private set; }
     public DeviceType DeviceType { get; private set; }
     public DateTime TimestampUtc { get; private set; }
-    public string DeviceId { get; private set; }
+    public string DeviceId { get; private set; } = string.Empty;
     public long LocalSequenceNumber { get; private set; }
     public GeoCoordinate? Location { get; private set; }
 
