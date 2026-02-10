@@ -22,7 +22,6 @@ public sealed class RosterController : ControllerBase
     [HttpGet("all")]
     public async Task<IActionResult> GetAll(CancellationToken ct)
     {
-
         var employees = await _directory.GetAllAsync(ct);
         return Ok(employees);
     }

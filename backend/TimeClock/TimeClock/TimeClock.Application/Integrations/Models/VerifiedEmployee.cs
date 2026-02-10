@@ -11,4 +11,5 @@ public sealed class VerifiedEmployee
     public Guid EmployeeId { get; init; }
     public string EmployeeNumber { get; init; } = string.Empty;
     public string FullName { get; init; } = string.Empty;
+    public bool IsClockedIn { get; init; }
 }

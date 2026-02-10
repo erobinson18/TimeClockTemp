@@ -9,13 +9,14 @@ class TimeClockApi {
   final ApiClient _client;
   TimeClockApi(this._client);
 
-  Future<VerifyResponse> verify(String employeeId) async {
-    final res = await _client.dio.post(
-      '/api/verify',
-      data: VerifyRequest(employeeId: employeeId).toJson(),
-    );
-    return VerifyResponse.fromJson(res.data as Map<String, dynamic>);
-  }
+Future<VerifyResponse> verify(String employeeNumber) async {
+  final res = await _client.dio.post(
+    '/api/verify',
+    data: {'employeeNumber': employeeNumber},
+  );
+
+  return VerifyResponse.fromJson(res.data);
+}
 
   Future<StatusResponse> status(String employeeGuid) async {
     final res = await _client.dio.get(

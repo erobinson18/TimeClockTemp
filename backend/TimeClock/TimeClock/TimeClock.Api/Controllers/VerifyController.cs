@@ -14,10 +14,16 @@ public class VerifyController : ControllerBase
         _service = service;
     }
 
-    [HttpPost]
-    public async Task<IActionResult> Verify([FromBody] VerifyEmployeeRequestDto request)
-    {
-        var result = await _service.VerifyAsync(request);
-        return Ok(result);
-    }
+[HttpPost]
+public async Task<IActionResult> Verify([FromBody] VerifyRequest request, CancellationToken ct)
+{
+    var result = await _verification.VerifyByEmployeeNumberAsync(
+        request.EmployeeNumber, ct);
+
+    if (result == null)
+        return Unauthorized();
+
+    return Ok(result);
+}
+
 }

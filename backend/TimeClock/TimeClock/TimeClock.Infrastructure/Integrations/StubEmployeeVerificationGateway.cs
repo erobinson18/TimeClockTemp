@@ -11,18 +11,23 @@ namespace TimeClock.Infrastructure.Integrations;
 
 public sealed class StubEmployeeVerificationGateway : IEmployeeVerificationGateway
 {
-    public Task<VerifiedEmployee?> VerifyByEmployeeNumberAsync(string employeeNumber, CancellationToken ct = default)
+public Task<VerifiedEmployee?> VerifyByEmployeeNumberAsync(
+    string employeeNumber,
+    CancellationToken ct = default)
+{
+    var emp = StubRoster.Employees
+        .FirstOrDefault(e => e.EmployeeNumber == employeeNumber);
+
+    if (emp == null)
+        return Task.FromResult<VerifiedEmployee?>(null);
+
+    return Task.FromResult<VerifiedEmployee?>(new VerifiedEmployee
     {
-        var emp = StubRoster.Employees.FirstOrDefault(e => e.EmployeeNumber == employeeNumber);
+        EmployeeId = emp.EmployeeId,
+        EmployeeNumber = emp.EmployeeNumber,
+        FullName = emp.FullName,
+        IsClockedIn = emp.IsClockedIn
+    });
+}
 
-        if (emp == null)
-            return Task.FromResult<VerifiedEmployee?>(null);
-
-        return Task.FromResult<VerifiedEmployee?>(new VerifiedEmployee
-        {
-            EmployeeId = emp.EmployeeId,
-            EmployeeNumber = employeeNumber,
-            FullName = emp.FullName
-        });
-    }
 }

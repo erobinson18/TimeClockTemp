@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'features/tablet/tablet_screen.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const TimeClockApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class TimeClockApp extends StatelessWidget {
+  const TimeClockApp({super.key});
 
   @override
   Widget build(BuildContext context) {
