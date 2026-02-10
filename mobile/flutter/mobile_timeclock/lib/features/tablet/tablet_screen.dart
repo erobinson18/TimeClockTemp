@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../core/api_client.dart';
 import '../../data/local/punch_queue.dart';
@@ -9,6 +11,7 @@ import '../../data/models/status.dart';
 import '../../data/models/sync.dart';
 import '../../data/models/verify.dart';
 import '../../data/remote/timeclock_api.dart';
+import '../../data/local/roster_cache.dart';
 
 class TabletScreen extends StatefulWidget {
   const TabletScreen({super.key});
@@ -20,6 +23,7 @@ class TabletScreen extends StatefulWidget {
 class _TabletScreenState extends State<TabletScreen> {
   late final TimeClockApi _api;
   final _queue = PunchQueue();
+  final _rosterCache = RosterCache();
 
   // Kiosk entry
   String _employeeNumber = "";
@@ -43,6 +47,7 @@ class _TabletScreenState extends State<TabletScreen> {
 
   // local sequence (simple in-memory counter for now)
   int _localSeq = 0;
+  bool _forceOffline = false;
 
   Timer? _clockTimer;
   DateTime _now = DateTime.now();
@@ -54,6 +59,7 @@ class _TabletScreenState extends State<TabletScreen> {
 
     _refreshPending();
     _startClock();
+    _warmupRoster();
 
     // optional: auto-sync attempt on launch
     _trySync();
@@ -122,9 +128,10 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   // For testing offline stacking:
-  // If your project already added a "forceOffline" toggle earlier, you can wire it here.
-  // Otherwise, this simply treats network errors as "offline" and queues punches.
+  // This simply treats network errors as "offline" and queues punches.
   Future<bool> _isOnline() async {
+    if (_forceOffline) return false;
+
     try {
       await _api.ping(); // cheap GET
       return true;
@@ -132,6 +139,17 @@ class _TabletScreenState extends State<TabletScreen> {
       return false;
     }
   }
+
+  Future<void> _warmupRoster() async {
+  try {
+    if (!await _isOnline()) return;
+    final roster = await _api.rosterAll();
+    await _rosterCache.saveAll(roster.map((e) => e.toJson()).toList());
+  } catch (_) {
+    // silent
+  }
+}
+
 
   Future<void> _trySync() async {
     try {
@@ -162,13 +180,13 @@ class _TabletScreenState extends State<TabletScreen> {
         punches: punches,
       );
 
-      final processed = await _api.syncBatch(batch);
+      final result = await _api.syncBatch(batch);
 
-      await _queue.clear();
+      await _queue.removeByLocalSeq(result.acceptedSeq.toSet());
       await _refreshPending();
 
       setState(() {
-        _message = "Synced $processed punch(es).";
+        _message = "Synced ${result.processed} punch(es).";
       });
 
       // refresh current employee status if a person is verified
@@ -389,25 +407,44 @@ class _TabletScreenState extends State<TabletScreen> {
             ),
 
             // Top-right small sync indicator
-            Positioned(
-              right: 24,
-              top: 10,
-              child: TextButton(
-                onPressed: _trySync,
-                child: Text(
-                  "Sync Now",
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
-                    fontSize: 12,
-                  ),
+              Positioned(
+                right: 24,
+                top: 10,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton(
+                      onPressed: _trySync,
+                      child: Text(
+                        "Sync Now",
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => setState(() => _forceOffline = !_forceOffline),
+                      child: Text(
+                        _forceOffline ? "OFFLINE: ON" : "OFFLINE: OFF",
+                        style: TextStyle(
+                          color: _forceOffline
+                              ? Colors.orange.withOpacity(0.9)
+                              : Colors.white.withOpacity(0.7),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-    );
-  }
+      );
+    }
 
   Widget _buildLeftPanel(bool canVerify) {
     return Container(

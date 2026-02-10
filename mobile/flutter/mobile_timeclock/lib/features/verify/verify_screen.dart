@@ -12,7 +12,6 @@ class VerifyScreen extends StatefulWidget {
 
 class _VerifyScreenState extends State<VerifyScreen> {
   final _employeeIdCtrl = TextEditingController();
-  final _employeeGuidCtrl = TextEditingController(); // Temp for testing
   late final TimeClockApi _api;
 
   bool _loading = false;
@@ -24,6 +23,12 @@ class _VerifyScreenState extends State<VerifyScreen> {
     _api = TimeClockApi(ApiClient());
   }
 
+  @override
+  void dispose() {
+    _employeeIdCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _verify() async {
     setState(() {
       _loading = true;
@@ -32,24 +37,17 @@ class _VerifyScreenState extends State<VerifyScreen> {
 
     try {
       final res = await _api.verify(_employeeIdCtrl.text.trim());
-      if (!res.isValid) {
-        setState(() => _msg = "Invalid Employee ID");
-        return;
-      }
-
-      final guid = _employeeGuidCtrl.text.trim();
-      if (guid.isEmpty) {
-        setState(() => _msg = "Verified. Enter Employee GUID (for testing).");
-        return;
-      }
 
       if (!mounted) return;
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => StatusScreen(employeeGuid: guid)),
+        MaterialPageRoute(
+          builder: (_) => StatusScreen(employeeGuid: res.employeeId),
+        ),
       );
     } catch (e) {
-      setState(() => _msg = "Verify failed: $e");
+      // Invalid employee will typically be 401 -> Dio throws -> we land here
+      setState(() => _msg = "Verify failed");
     } finally {
       setState(() => _loading = false);
     }
@@ -66,12 +64,6 @@ class _VerifyScreenState extends State<VerifyScreen> {
             TextField(
               controller: _employeeIdCtrl,
               decoration: const InputDecoration(labelText: "Employee ID"),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _employeeGuidCtrl,
-              decoration: const InputDecoration(
-                labelText: "Employee GUID (testing)"),
             ),
             const SizedBox(height: 16),
             ElevatedButton(

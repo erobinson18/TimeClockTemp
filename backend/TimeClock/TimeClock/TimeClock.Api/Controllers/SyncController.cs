@@ -6,20 +6,30 @@ namespace TimeClock.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class SyncController : ControllerBase
+public sealed class SyncController : ControllerBase
 {
-    private readonly IPunchSyncService _service;
+    private readonly IPunchSyncService _syncService;
 
-    public SyncController(IPunchSyncService service)
+    public SyncController(IPunchSyncService syncService)
     {
-        _service = service;
+        _syncService = syncService;
     }
 
     [HttpPost("batch")]
     public async Task<IActionResult> Batch([FromBody] SyncPunchBatchDto batch)
     {
-        var processed = await _service.SyncAsync(batch);
+        // Process
+        var processed = await _syncService.SyncAsync(batch);
 
-        return Ok(new { Success = true, processed });
+        // We accept all sequence numbers we received (simple + reliable for offline queue cleanup)
+        var acceptedSeq = batch.Punches
+            .Select(p => (int)p.LocalSequenceNumber)
+            .ToList();
+
+        return Ok(new
+        {
+            processed,
+            acceptedSeq
+        });
     }
 }

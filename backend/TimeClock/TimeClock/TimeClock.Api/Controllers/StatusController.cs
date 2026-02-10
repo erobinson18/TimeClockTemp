@@ -14,11 +14,13 @@ public class StatusController : ControllerBase
         _service = service;
     }
 
-    [HttpGet("{employeeId:guid}")]
-    public async Task<IActionResult> Get(Guid employeeId)
+    [HttpGet("{employeeId}")]
+    public async Task<IActionResult> Get(string employeeId, CancellationToken ct)
     {
-        var result = await _service.GetStatusAsync(employeeId);
+        if (string.IsNullOrWhiteSpace(employeeId))
+            return BadRequest("EmployeeId is required.");
 
+        var result = await _service.GetStatusAsync(employeeId, ct);
         return Ok(result);
     }
 

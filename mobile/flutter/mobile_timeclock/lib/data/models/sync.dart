@@ -1,6 +1,6 @@
 class SyncPunchBatch {
   final String deviceId;
-  final int deviceType; // backend expects int (1,2)
+  final int deviceType;
   final List<SyncPunch> punches;
 
   SyncPunchBatch({
@@ -9,18 +9,16 @@ class SyncPunchBatch {
     required this.punches,
   });
 
-  Map<String, dynamic> toJson() {
-    return {
-      "deviceId": deviceId,
-      "deviceType": deviceType,
-      "punches": punches.map((p) => p.toJson()).toList(),
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        "deviceId": deviceId,
+        "deviceType": deviceType,
+        "punches": punches.map((p) => p.toJson()).toList(),
+      };
 }
 
 class SyncPunch {
-  final String employeeId; // GUID as string
-  final int punchType;     // 1 = in, 2 = out
+  final String employeeId;
+  final int punchType;
   final int localSequenceNumber;
   final DateTime timestampUtc;
   final double? latitude;
@@ -35,14 +33,30 @@ class SyncPunch {
     this.longitude,
   });
 
-  Map<String, dynamic> toJson() {
-    return {
-      "employeeId": employeeId,
-      "punchType": punchType,
-      "localSequenceNumber": localSequenceNumber,
-      "timestampUtc": timestampUtc.toIso8601String(),
-      "latitude": latitude,
-      "longitude": longitude,
-    };
+  Map<String, dynamic> toJson() => {
+        "employeeId": employeeId,
+        "punchType": punchType,
+        "localSequenceNumber": localSequenceNumber,
+        "timestampUtc": timestampUtc.toIso8601String(),
+        "latitude": latitude,
+        "longitude": longitude,
+      };
+}
+
+class SyncBatchResult {
+  final int processed;
+  final List<int> acceptedSeq;
+
+  SyncBatchResult({
+    required this.processed,
+    required this.acceptedSeq,
+  });
+
+  factory SyncBatchResult.fromJson(Map<String, dynamic> json) {
+    final seq = (json["acceptedSeq"] as List?) ?? const [];
+    return SyncBatchResult(
+      processed: (json["processed"] as num?)?.toInt() ?? 0,
+      acceptedSeq: seq.map((e) => (e as num).toInt()).toList(),
+    );
   }
 }

@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'features/tablet/tablet_screen.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter(); // tablet storage
+
   runApp(const TimeClockApp());
 }
 
@@ -12,8 +16,7 @@ class TimeClockApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'TimeClock',
-      home: const TabletScreen(),
+      home: TabletScreen(),
     );
   }
 }

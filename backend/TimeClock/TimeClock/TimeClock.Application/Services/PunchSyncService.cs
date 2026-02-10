@@ -20,12 +20,14 @@ public class PunchSyncService : IPunchSyncService
         _PunchService = punchService;
     }
 
-    public async Task<int> SyncAsync(SyncPunchBatchDto batch)
+    public async Task<SyncResultDto> SyncAsync(SyncPunchBatchDto batch)
     {
         var ordered = batch.Punches
             .OrderBy(p => p.TimestampUtc)
             .ThenBy(p => p.LocalSequenceNumber)
             .ToList();
+
+        var accepted = new List<long>(ordered.Count);
 
         foreach (var p in ordered)
         {
@@ -45,8 +47,14 @@ public class PunchSyncService : IPunchSyncService
             );
 
             await _PunchService.CreateAsync(cmd);
+
+            accepted.Add(p.LocalSequenceNumber);
         }
 
-        return ordered.Count;
+        return new SyncResultDto
+        {
+          Processed = accepted.Count,
+          AcceptedLocalSequenceNumbers = accepted  
+        };
     }
 }

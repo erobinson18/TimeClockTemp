@@ -9,5 +9,5 @@ namespace TimeClock.Application.Interfaces;
 
 public interface IPunchSyncService
 {
-    Task<int> SyncAsync(SyncPunchBatchDto batch);
+    Task<SyncResultDto> SyncAsync(SyncPunchBatchDto batch);
 }

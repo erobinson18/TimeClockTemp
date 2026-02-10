@@ -24,4 +24,18 @@ class PunchQueue {
     final box = await _box();
     return box.length;
   }
+
+  Future<void> removeByLocalSeq(Set<int> acceptedSeq) async {
+    final items = await all();
+
+    final remaining = items.where((p) {
+      final seq = (p['localSequenceNumber'] as num?)?.toInt() ?? -1;
+      return !acceptedSeq.contains(seq);
+    });
+
+    await clear();
+    for (final p in remaining) {
+      await enqueue(p);
+    }
+  }
 }

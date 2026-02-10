@@ -10,23 +10,21 @@ using TimeClock.Domain.Enums;
 
 namespace TimeClock.Application.Services;
 
-public class EmployeeStatusService : IEmployeeStatusService
+public sealed class EmployeeStatusService : IEmployeeStatusService
 {
-    private readonly ITimePunchRepository _repo;
+    private readonly ITimePunchService _timePunchService;
 
-    public EmployeeStatusService(ITimePunchRepository repo)
+    public EmployeeStatusService(ITimePunchService timePunchService)
     {
-        _repo = repo;
+        _timePunchService = timePunchService;
     }
 
-    public async Task<EmployeeStatusDto> GetStatusAsync(Guid employeeId)
+    public async Task<StatusResponseDto> GetStatusAsync(string employeeId, CancellationToken ct)
     {
-        var latestPunch = await _repo.GetLatestByEmployeeIdAsync(employeeId);
-        var isClockedIn = latestPunch != null && latestPunch.PunchType == PunchType.ClockIn;
+        var isClockedIn = await _timePunchService.IsEmployeeClockedInAsync(employeeId, ct);
 
-        return new EmployeeStatusDto
+        return new StatusResponseDto
         {
-            EmployeeId = employeeId,
             IsClockedIn = isClockedIn
         };
     }

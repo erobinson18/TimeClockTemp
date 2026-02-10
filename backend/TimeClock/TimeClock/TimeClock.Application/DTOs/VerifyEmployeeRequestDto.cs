@@ -2,11 +2,14 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace TimeClock.Application.DTOs;
 
-public class VerifyEmployeeRequestDto
+// Application-layer request DTO (what the service expects)
+public sealed class VerifyEmployeeRequestDto
 {
-    public string EmployeeId { get; set; } = string.Empty;
+    public string EmployeeNumber { get; set; } = string.Empty;
 }
+
