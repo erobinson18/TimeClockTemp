@@ -1,23 +1,19 @@
 import 'package:flutter/material.dart';
-import 'features/verify/verify_screen.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'features/tablet/tablet_screen.dart';
 
-
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Hive.initFlutter();
-  runApp(const TimeClockApp());
+void main() {
+  runApp(const MyApp());
 }
 
-class TimeClockApp extends StatelessWidget {
-  const TimeClockApp({super.key});
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'TimeClock',
-      theme: ThemeData(useMaterial3: true),
-      home: const VerifyScreen(),
+      home: const TabletScreen(),
     );
   }
 }

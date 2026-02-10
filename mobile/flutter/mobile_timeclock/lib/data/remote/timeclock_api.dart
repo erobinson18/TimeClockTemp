@@ -3,6 +3,7 @@ import '../models/verify.dart';
 import '../models/status.dart';
 import '../models/punch.dart';
 import '../models/sync.dart';
+import '../models/employee_directory_item.dart';
 
 class TimeClockApi {
   final ApiClient _client;
@@ -34,5 +35,11 @@ class TimeClockApi {
 
   Future<void> ping() async {
     await _client.dio.get('/api/health/ping');
+  }
+
+  Future<List<EmployeeDirectoryItem>> rosterAll() async {
+    final res = await _client.dio.get('/api/roster/all');
+    final list = (res.data as List).cast<Map<String, dynamic>>();
+    return list.map(EmployeeDirectoryItem.fromJson).toList();
   }
 }
