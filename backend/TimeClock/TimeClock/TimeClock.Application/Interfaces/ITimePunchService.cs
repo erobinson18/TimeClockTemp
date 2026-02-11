@@ -10,4 +10,5 @@ namespace TimeClock.Application.Interfaces;
 public interface ITimePunchService
 {
     Task CreateAsync(CreateTimePunchCommand command);
+    Task<bool> IsEmployeeClockedInAsync(string employeeId, CancellationToken ct);
 }
