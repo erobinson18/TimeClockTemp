@@ -18,24 +18,17 @@ public sealed class VerifyController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Verify([FromBody] VerifyRequestDto request, CancellationToken ct)
     {
-        if (request == null)
-            return BadRequest("Request body is required.");
-
-        var empNum = request.GetEmployeeNumber();
+        var empNum = request?.GetEmployeeNumber()?.Trim();
 
         if (string.IsNullOrWhiteSpace(empNum))
-            return BadRequest("EmployeeNumber (or EmployeeId) is required.");
-
-        var appRequest = new VerifyEmployeeRequestDto
         {
-            EmployeeNumber = empNum.Trim()
-        };
+            return BadRequest("employeeNumber (or employeeId) is required.");
+        }
 
-        var result = await _service.VerifyAsync(appRequest);
+        // Service returns a result with IsValid true/false
+        var result = await _service.VerifyAsync(empNum, ct);
 
-        if (result == null)
-            return Unauthorized();
-
+        // IMPORTANT: never return 401 for invalid employee id
         return Ok(result);
     }
 }

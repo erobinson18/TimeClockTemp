@@ -10,5 +10,5 @@ namespace TimeClock.Application.Interfaces;
 
 public interface IEmployeeVerificationService
 {
-    Task<VerifyEmployeeResultDto> VerifyAsync(VerifyEmployeeRequestDto request);
+    Task<VerifyEmployeeResultDto> VerifyAsync(string employeeNumber, CancellationToken ct);
 }

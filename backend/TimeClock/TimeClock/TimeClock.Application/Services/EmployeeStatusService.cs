@@ -2,30 +2,33 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
-using TimeClock.Application.Interfaces;
 using TimeClock.Application.DTOs;
-using TimeClock.Domain.Interfaces;
-using TimeClock.Domain.Enums;
+using TimeClock.Application.Interfaces;
 
 namespace TimeClock.Application.Services;
 
 public sealed class EmployeeStatusService : IEmployeeStatusService
 {
-    private readonly ITimePunchService _timePunchService;
+    private readonly ITimePunchService _punchService;
 
-    public EmployeeStatusService(ITimePunchService timePunchService)
+    public EmployeeStatusService(ITimePunchService punchService)
     {
-        _timePunchService = timePunchService;
+        _punchService = punchService;
     }
 
-    public async Task<StatusResponseDto> GetStatusAsync(string employeeId, CancellationToken ct)
-    {
-        var isClockedIn = await _timePunchService.IsEmployeeClockedInAsync(employeeId, ct);
+    public Task<bool> IsEmployeeClockedInAsync(string employeeId, CancellationToken ct)
+        => _punchService.IsEmployeeClockedInAsync(employeeId, ct);
 
-        return new StatusResponseDto
+    public async Task<EmployeeStatusDto> GetStatusAsync(string employeeId, CancellationToken ct)
+    {
+        var clockedIn = await _punchService.IsEmployeeClockedInAsync(employeeId, ct);
+
+        return new EmployeeStatusDto
         {
-            IsClockedIn = isClockedIn
+            EmployeeId = employeeId,
+            IsClockedIn = clockedIn
         };
     }
 }

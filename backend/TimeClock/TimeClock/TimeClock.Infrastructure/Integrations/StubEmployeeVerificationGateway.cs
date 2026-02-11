@@ -23,7 +23,7 @@ public sealed class StubEmployeeVerificationGateway : IEmployeeVerificationGatew
 
         return Task.FromResult<VerifiedEmployee?>(new VerifiedEmployee
         {
-            EmployeeId = emp.EmployeeId,
+            EmployeeId = emp.EmployeeId.ToString(),
             EmployeeNumber = emp.EmployeeNumber,
             FullName = emp.FullName,
             IsClockedIn = emp.IsClockedIn

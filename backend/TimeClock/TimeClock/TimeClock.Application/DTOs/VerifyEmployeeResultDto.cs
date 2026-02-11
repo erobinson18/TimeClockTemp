@@ -6,9 +6,10 @@ using System.Threading.Tasks;
 
 namespace TimeClock.Application.DTOs;
 
-public class VerifyEmployeeResultDto
+public sealed class VerifyEmployeeResultDto
 {
     public bool IsValid { get; set; }
-    public string? EmployeeId { get; set; }
-    public string? DisplayName { get; set; }
+    public string? EmployeeId { get; set; }     // GUID string
+    public string? FullName { get; set; }
+    public bool IsClockedIn { get; set; }
 }

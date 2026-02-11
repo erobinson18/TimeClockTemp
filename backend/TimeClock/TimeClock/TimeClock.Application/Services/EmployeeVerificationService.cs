@@ -1,25 +1,39 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using TimeClock.Application.DTOs;
 using TimeClock.Application.Interfaces;
+using TimeClock.Application.Integrations;
 
 namespace TimeClock.Application.Services;
 
-public class EmployeeVerificationService : IEmployeeVerificationService
+public sealed class EmployeeVerificationService : IEmployeeVerificationService
 {
-    public Task<VerifyEmployeeResultDto> VerifyAsync(VerifyEmployeeRequestDto request)
-    {
-        // Temp stub till real implementation is done
-        var ok = !string.IsNullOrWhiteSpace(request.EmployeeId);
+    private readonly IEmployeeVerificationGateway _gateway;
 
-        return Task.FromResult(new VerifyEmployeeResultDto
+    public EmployeeVerificationService(IEmployeeVerificationGateway gateway)
+    {
+        _gateway = gateway;
+    }
+
+    public async Task<VerifyEmployeeResultDto> VerifyAsync(string employeeNumber, CancellationToken ct)
+    {
+        var verified = await _gateway.VerifyByEmployeeNumberAsync(employeeNumber, ct);
+
+        if (verified == null)
         {
-            IsValid = ok,
-            EmployeeId = ok ? request.EmployeeId : null,
-            DisplayName = ok ? "Employee" : null
-        });
+            return new VerifyEmployeeResultDto
+            {
+                IsValid = false
+            };
+        }
+
+        return new VerifyEmployeeResultDto
+        {
+            IsValid = true,
+            EmployeeId = verified.EmployeeId.ToString(),
+            FullName = verified.FullName,
+            IsClockedIn = verified.IsClockedIn
+        };
     }
 }

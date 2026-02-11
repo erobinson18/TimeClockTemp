@@ -8,6 +8,6 @@ namespace TimeClock.Application.DTOs;
 
 public class EmployeeStatusDto
 {
-    public Guid EmployeeId { get; set; }
+    public string EmployeeId { get; set; } = string.Empty;
     public bool IsClockedIn { get; set; }
 }

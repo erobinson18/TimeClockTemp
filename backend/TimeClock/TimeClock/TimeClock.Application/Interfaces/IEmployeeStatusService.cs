@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using TimeClock.Application.DTOs;
 using TimeClock.Application.Services;
@@ -10,5 +11,7 @@ namespace TimeClock.Application.Interfaces;
 
 public interface IEmployeeStatusService
 {
-    Task<StatusResponseDto> GetStatusAsync(string employeeId, CancellationToken ct);
+    Task<bool> IsEmployeeClockedInAsync(string employeeId, CancellationToken ct);
+
+    Task<EmployeeStatusDto> GetStatusAsync(string employeeId, CancellationToken ct);
 }

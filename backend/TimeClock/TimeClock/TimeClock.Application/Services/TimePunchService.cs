@@ -1,24 +1,16 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+﻿using System.Threading;
 using System.Threading.Tasks;
 using TimeClock.Application.Commands;
 using TimeClock.Application.Interfaces;
 using TimeClock.Domain.Entities;
+using TimeClock.Domain.Enums;
 using TimeClock.Domain.Interfaces;
 
 namespace TimeClock.Application.Services;
 
-public class TimePunchService : ITimePunchService
+public sealed class TimePunchService : ITimePunchService
 {
     private readonly ITimePunchRepository _repository;
-    private readonly TimeClockDbContext _db;
-
-    public TimePunchService(TimeClockDbContext db)
-    {
-        _db = db;
-    }
 
     public TimePunchService(ITimePunchRepository repository)
     {
@@ -33,7 +25,8 @@ public class TimePunchService : ITimePunchService
             command.DeviceType,
             command.DeviceId,
             command.LocalSequenceNumber,
-            command.Location
+            command.Location,
+            command.TimestampUtc
         );
 
         await _repository.AddAsync(punch);
@@ -44,18 +37,15 @@ public class TimePunchService : ITimePunchService
         if (string.IsNullOrWhiteSpace(employeeId))
             return false;
 
-        var lastPunch = await _db.TimePunches
-            .AsNoTracking()
-            .Where(p => p.EmployeeId == employeeId)
-            .OrderByDescending(p => p.TimestampUtc)
-            .ThenByDescending(p => p.LocalSequenceNumber)
-            .Select(p => new { p.PunchType })
-            .FirestOrDefaultAsync(ct);
-
-        if (lastPunch == null)
+        if (!Guid.TryParse(employeeId, out var guid))
             return false;
 
-        return lastPunch.PunchType == PunchType.ClockIn
-            || lastPunch.PunchType == 1;
+        var lastPunchType = await _repository.GetLastPunchTypeAsync(guid, ct);
+
+        if (!lastPunchType.HasValue)
+            return false;
+
+        return lastPunchType.Value == (int)PunchType.ClockIn
+               || lastPunchType.Value == 1;
     }
 }

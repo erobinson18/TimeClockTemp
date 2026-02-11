@@ -10,6 +10,8 @@ using TimeClock.Infrastructure.Persistence;
 using TimeClock.Infrastructure.Repositories;
 using TimeClock.Application.Integrations;
 using TimeClock.Infrastructure.Integrations;
+using TimeClock.Application.Services;
+using TimeClock.Application.Interfaces;
 
 namespace TimeClock.Infrastructure;
 
@@ -23,6 +25,12 @@ public static class DependencyInjection
             opt.UseSqlServer(connectionString));
 
         services.AddScoped<ITimePunchRepository, TimePunchRepository>();
+
+        services.AddScoped<ITimePunchService, TimePunchService>();
+        services.AddScoped<IEmployeeStatusService, EmployeeStatusService>();
+
+        services.AddScoped<IEmployeeVerificationService, EmployeeVerificationService>();
+
         services.AddScoped<IEmployeeDirectoryGateway, StubEmployeeDirectoryGateway>();
         services.AddScoped<IEmployeeVerificationGateway, StubEmployeeVerificationGateway>();
         services.AddScoped<IEmployeeStatusGateway, EfEmployeeStatusGateway>();

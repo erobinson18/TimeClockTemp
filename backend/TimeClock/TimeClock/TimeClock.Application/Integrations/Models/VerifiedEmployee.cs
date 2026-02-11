@@ -8,7 +8,7 @@ namespace TimeClock.Application.Integrations.Models;
 
 public sealed class VerifiedEmployee
 {
-    public Guid EmployeeId { get; set; }
+    public string EmployeeId { get; set; } = string.Empty;
     public string EmployeeNumber { get; set; } = string.Empty;
     public string FullName { get; set; } = string.Empty;
     public bool IsClockedIn { get; set; }

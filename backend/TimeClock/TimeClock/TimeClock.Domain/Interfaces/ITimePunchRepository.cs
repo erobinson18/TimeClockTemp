@@ -10,5 +10,5 @@ namespace TimeClock.Domain.Interfaces;
 public interface ITimePunchRepository
 {
     Task AddAsync(TimePunch punch);
-    Task<TimePunch?> GetLatestByEmployeeIdAsync(Guid employeeId);
+    Task<int?> GetLastPunchTypeAsync(Guid employeeId, CancellationToken ct);
 }
