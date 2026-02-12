@@ -1,61 +1,69 @@
-import 'package:hive/hive.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class CachedEmployee {
+  final String employeeId; // GUID string
+  final String employeeNumber;
+  final String fullName;
+
+  CachedEmployee({
+    required this.employeeId,
+    required this.employeeNumber,
+    required this.fullName,
+  });
+
+  factory CachedEmployee.fromJson(Map<String, dynamic> j) => CachedEmployee(
+        employeeId: (j["employeeId"] ?? "") as String,
+        employeeNumber: (j["employeeNumber"] ?? "") as String,
+        fullName: (j["fullName"] ?? "") as String,
+      );
+
+  Map<String, dynamic> toJson() => {
+        "employeeId": employeeId,
+        "employeeNumber": employeeNumber,
+        "fullName": fullName,
+      };
+}
 
 class RosterCache {
-  static const String boxName = 'roster_cache_v1';
+  static const _key = "roster_cache_v1";
 
-  Future<Box> _box() async => await Hive.openBox(boxName);
-
-  /// Save roster items as:
-  /// { "34023": { "employeeId": "...guid...", "fullName": "LAST, FIRST MIDDLE" }, ... }
-  Future<void> saveAll(List<Map<String, dynamic>> items) async {
-    final box = await _box();
-    final Map<String, dynamic> map = {};
-
-    for (final e in items) {
-      final empNum = (e['employeeNumber'] ?? '').toString().trim();
-      if (empNum.isEmpty) continue;
-
-      map[empNum] = {
-        'employeeId': (e['employeeId'] ?? '').toString(),
-        'fullName': (e['fullName'] ?? '').toString(),
-      };
-    }
-
-    await box.put('employees', map);
-    await box.put('lastUpdatedUtc', DateTime.now().toUtc().toIso8601String());
+  Future<void> saveAll(List<Map<String, dynamic>> rosterJson) async {
+    final prefs = await SharedPreferences.getInstance();
+    final str = jsonEncode(rosterJson);
+    await prefs.setString(_key, str);
   }
 
-  Future<Map<String, dynamic>> _getAllMap() async {
-    final box = await _box();
-    final data = box.get('employees');
-    if (data is Map) return Map<String, dynamic>.from(data);
-    return {};
+  Future<List<CachedEmployee>> all() async {
+    final prefs = await SharedPreferences.getInstance();
+    final str = prefs.getString(_key);
+    if (str == null || str.isEmpty) return [];
+
+    final decoded = jsonDecode(str);
+    if (decoded is! List) return [];
+
+    return decoded
+        .whereType<Map>()
+        .map((m) => CachedEmployee.fromJson(m.cast<String, dynamic>()))
+        .toList();
   }
 
-  Future<({String employeeId, String fullName})?> findByEmployeeNumber(String employeeNumber) async {
-    final map = await _getAllMap();
-    final key = employeeNumber.trim();
-    final raw = map[key];
-
-    if (raw is Map) {
-      final m = Map<String, dynamic>.from(raw);
-      final id = (m['employeeId'] ?? '').toString();
-      final name = (m['fullName'] ?? '').toString();
-
-      if (id.isEmpty || name.isEmpty) return null;
-      return (employeeId: id, fullName: name);
-    }
-    return null;
+  Future<CachedEmployee?> findByEmployeeNumber(String employeeNumber) async {
+    final list = await all();
+    return list.firstWhere(
+      (e) => e.employeeNumber == employeeNumber,
+      orElse: () => CachedEmployee(
+        employeeId: "",
+        employeeNumber: "",
+        fullName: "",
+      ),
+    ).employeeId.isEmpty
+        ? null
+        : list.firstWhere((e) => e.employeeNumber == employeeNumber);
   }
 
-  Future<int> count() async {
-    final map = await _getAllMap();
-    return map.length;
-  }
-
-  Future<String?> lastUpdatedUtc() async {
-    final box = await _box();
-    final v = box.get('lastUpdatedUtc');
-    return v is String ? v : null;
+  Future<void> clear() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key);
   }
 }

@@ -11,7 +11,7 @@ class VerifyScreen extends StatefulWidget {
 }
 
 class _VerifyScreenState extends State<VerifyScreen> {
-  final _employeeIdCtrl = TextEditingController();
+  final _employeeNumberCtrl = TextEditingController();
   late final TimeClockApi _api;
 
   bool _loading = false;
@@ -25,31 +25,45 @@ class _VerifyScreenState extends State<VerifyScreen> {
 
   @override
   void dispose() {
-    _employeeIdCtrl.dispose();
+    _employeeNumberCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _verify() async {
+    final empNum = _employeeNumberCtrl.text.trim();
+    if (empNum.isEmpty) {
+      setState(() => _msg = "Enter your Employee ID");
+      return;
+    }
+
     setState(() {
       _loading = true;
       _msg = null;
     });
 
     try {
-      final res = await _api.verify(_employeeIdCtrl.text.trim());
+      final res = await _api.verify(empNum);
+
+      // If your backend includes isValid, respect it
+      if (!res.isValid || res.employeeId == null || res.employeeId!.isEmpty) {
+        setState(() => _msg = "Invalid Employee ID");
+        return;
+      }
 
       if (!mounted) return;
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => StatusScreen(employeeGuid: res.employeeId),
+          builder: (_) => StatusScreen(employeeGuid: res.employeeId!),
         ),
       );
-    } catch (e) {
+    } catch (_) {
       // Invalid employee will typically be 401 -> Dio throws -> we land here
       setState(() => _msg = "Verify failed");
     } finally {
-      setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -62,14 +76,19 @@ class _VerifyScreenState extends State<VerifyScreen> {
         child: Column(
           children: [
             TextField(
-              controller: _employeeIdCtrl,
+              controller: _employeeNumberCtrl,
               decoration: const InputDecoration(labelText: "Employee ID"),
+              keyboardType: TextInputType.number,
             ),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: _loading ? null : _verify,
               child: _loading
-                  ? const CircularProgressIndicator()
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Text("Verify"),
             ),
             if (_msg != null) ...[

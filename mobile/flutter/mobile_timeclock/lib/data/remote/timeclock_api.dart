@@ -9,11 +9,12 @@ class TimeClockApi {
   final ApiClient _client;
   TimeClockApi(this._client);
 
-  Future<VerifyResponse> verify(String employeeId) async {
+  Future<VerifyResponse> verify(String employeeNumber) async {
     final res = await _client.dio.post(
       '/api/verify',
-      data: VerifyRequest(employeeId: employeeId).toJson(),
+      data: VerifyRequest(employeeNumber: employeeNumber).toJson(),
     );
+
     return VerifyResponse.fromJson(res.data as Map<String, dynamic>);
   }
 
@@ -26,10 +27,9 @@ class TimeClockApi {
     await _client.dio.post('/api/punch', data: request.toJson());
   }
 
-  Future<SyncBatchResult> syncBatch(SyncPunchBatch batch) async {
-    final res = await _client.dio.post('/api/Sync/batch', data: batch.toJson());
-    final map = res.data as Map<String, dynamic>;
-    return SyncBatchResult.fromJson(map);
+  Future<SyncBatchResponse> syncBatch(SyncPunchBatch batch) async {
+    final res = await _client.dio.post('/api/sync/batch', data: batch.toJson());
+    return SyncBatchResponse.fromJson(res.data as Map<String, dynamic>);
   }
 
   Future<void> ping() async {

@@ -1,6 +1,6 @@
 class EmployeeDirectoryItem {
   final String employeeId; // GUID string
-  final String employeeNumber; // 5-6 digit string
+  final String employeeNumber;
   final String fullName;
 
   EmployeeDirectoryItem({
@@ -11,15 +11,15 @@ class EmployeeDirectoryItem {
 
   factory EmployeeDirectoryItem.fromJson(Map<String, dynamic> json) {
     return EmployeeDirectoryItem(
-      employeeId: json['employeeId'] as String,
-      employeeNumber: json['employeeNumber'] as String,
-      fullName: json['fullName'] as String,
+      employeeId: json["employeeId"] as String,
+      employeeNumber: json["employeeNumber"] as String,
+      fullName: json["fullName"] as String,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'employeeId': employeeId,
-        'employeeNumber': employeeNumber,
-        'fullName': fullName,
+        "employeeId": employeeId,
+        "employeeNumber": employeeNumber,
+        "fullName": fullName,
       };
 }

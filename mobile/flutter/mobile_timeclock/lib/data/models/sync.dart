@@ -1,21 +1,3 @@
-class SyncPunchBatch {
-  final String deviceId;
-  final int deviceType;
-  final List<SyncPunch> punches;
-
-  SyncPunchBatch({
-    required this.deviceId,
-    required this.deviceType,
-    required this.punches,
-  });
-
-  Map<String, dynamic> toJson() => {
-        "deviceId": deviceId,
-        "deviceType": deviceType,
-        "punches": punches.map((p) => p.toJson()).toList(),
-      };
-}
-
 class SyncPunch {
   final String employeeId;
   final int punchType;
@@ -37,26 +19,51 @@ class SyncPunch {
         "employeeId": employeeId,
         "punchType": punchType,
         "localSequenceNumber": localSequenceNumber,
-        "timestampUtc": timestampUtc.toIso8601String(),
+        "timestampUtc": timestampUtc.toUtc().toIso8601String(),
         "latitude": latitude,
         "longitude": longitude,
       };
 }
 
-class SyncBatchResult {
+class SyncPunchBatch {
+  final String deviceId;
+  final int deviceType;
+  final List<SyncPunch> punches;
+
+  SyncPunchBatch({
+    required this.deviceId,
+    required this.deviceType,
+    required this.punches,
+  });
+
+  Map<String, dynamic> toJson() => {
+        "deviceId": deviceId,
+        "deviceType": deviceType,
+        "punches": punches.map((p) => p.toJson()).toList(),
+      };
+}
+
+/// Response from /api/Sync/batch
+class SyncBatchResponse {
   final int processed;
   final List<int> acceptedSeq;
 
-  SyncBatchResult({
+  SyncBatchResponse({
     required this.processed,
     required this.acceptedSeq,
   });
 
-  factory SyncBatchResult.fromJson(Map<String, dynamic> json) {
-    final seq = (json["acceptedSeq"] as List?) ?? const [];
-    return SyncBatchResult(
-      processed: (json["processed"] as num?)?.toInt() ?? 0,
-      acceptedSeq: seq.map((e) => (e as num).toInt()).toList(),
+  factory SyncBatchResponse.fromJson(Map<String, dynamic> json) {
+    final processed = (json["processed"] as num?)?.toInt() ?? 0;
+
+    final accepted = json["acceptedSeq"];
+    final acceptedSeq = (accepted is List)
+        ? accepted.map((e) => (e as num).toInt()).toList()
+        : <int>[];
+
+    return SyncBatchResponse(
+      processed: processed,
+      acceptedSeq: acceptedSeq,
     );
   }
 }

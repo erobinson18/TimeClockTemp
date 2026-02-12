@@ -1,35 +1,24 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using TimeClock.Application.Interfaces;
 using TimeClock.Application.DTOs;
+using TimeClock.Application.Interfaces;
 
 namespace TimeClock.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/sync")]
 public sealed class SyncController : ControllerBase
 {
-    private readonly IPunchSyncService _syncService;
+    private readonly IPunchSyncService _sync;
 
-    public SyncController(IPunchSyncService syncService)
+    public SyncController(IPunchSyncService sync)
     {
-        _syncService = syncService;
+        _sync = sync;
     }
 
     [HttpPost("batch")]
-    public async Task<IActionResult> Batch([FromBody] SyncPunchBatchDto batch)
+    public async Task<ActionResult<SyncPunchBatchResultDto>> Batch([FromBody] SyncPunchBatchDto batch, CancellationToken ct)
     {
-        // Process
-        var processed = await _syncService.SyncAsync(batch);
-
-        // We accept all sequence numbers we received (simple + reliable for offline queue cleanup)
-        var acceptedSeq = batch.Punches
-            .Select(p => (int)p.LocalSequenceNumber)
-            .ToList();
-
-        return Ok(new
-        {
-            processed,
-            acceptedSeq
-        });
+        var result = await _sync.SyncAsync(batch);
+        return Ok(result);
     }
 }

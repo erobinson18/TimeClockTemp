@@ -1,12 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using TimeClock.Application.DTOs;
 using TimeClock.Application.Interfaces;
-using TimeClock.Application.DTOs;
 using TimeClock.Application.Commands;
-using TimeClock.Domain.Enums;
 using TimeClock.Domain.ValueObjects;
 
 namespace TimeClock.Application.Services;
@@ -20,7 +14,7 @@ public class PunchSyncService : IPunchSyncService
         _PunchService = punchService;
     }
 
-    public async Task<SyncResultDto> SyncAsync(SyncPunchBatchDto batch)
+    public async Task<SyncPunchBatchResultDto> SyncAsync(SyncPunchBatchDto batch)
     {
         var ordered = batch.Punches
             .OrderBy(p => p.TimestampUtc)
@@ -51,10 +45,10 @@ public class PunchSyncService : IPunchSyncService
             accepted.Add(p.LocalSequenceNumber);
         }
 
-        return new SyncResultDto
+        return new SyncPunchBatchResultDto
         {
-          Processed = accepted.Count,
-          AcceptedLocalSequenceNumbers = accepted  
+            Processed = accepted.Count,
+            AcceptedSeq = accepted
         };
     }
 }

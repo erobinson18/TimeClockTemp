@@ -1,41 +1,47 @@
-import 'package:hive/hive.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class PunchQueue {
-  static const String boxName = 'pending_punches';
-
-  Future<Box> _box() async => await Hive.openBox(boxName);
-
-  Future<void> enqueue(Map<String, dynamic> punchJson) async {
-    final box = await _box();
-    await box.add(punchJson);
-  }
+  static const _key = "punch_queue_v1";
 
   Future<List<Map<String, dynamic>>> all() async {
-    final box = await _box();
-    return box.values.map((e) => Map<String, dynamic>.from(e)).toList();
+    final prefs = await SharedPreferences.getInstance();
+    final str = prefs.getString(_key);
+    if (str == null || str.isEmpty) return [];
+
+    final decoded = jsonDecode(str);
+    if (decoded is! List) return [];
+
+    return decoded
+        .whereType<Map>()
+        .map((m) => m.cast<String, dynamic>())
+        .toList();
+  }
+
+  Future<int> count() async => (await all()).length;
+
+  Future<void> enqueue(Map<String, dynamic> punch) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await all();
+    list.add(punch);
+    await prefs.setString(_key, jsonEncode(list));
   }
 
   Future<void> clear() async {
-    final box = await _box();
-    await box.clear();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key);
   }
 
-  Future<int> count() async {
-    final box = await _box();
-    return box.length;
-  }
+  Future<void> removeByLocalSeq(Set<int> seqs) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await all();
 
-  Future<void> removeByLocalSeq(Set<int> acceptedSeq) async {
-    final items = await all();
+    final kept = list.where((p) {
+      final v = p["localSequenceNumber"];
+      final n = (v is num) ? v.toInt() : int.tryParse("$v") ?? -1;
+      return !seqs.contains(n);
+    }).toList();
 
-    final remaining = items.where((p) {
-      final seq = (p['localSequenceNumber'] as num?)?.toInt() ?? -1;
-      return !acceptedSeq.contains(seq);
-    });
-
-    await clear();
-    for (final p in remaining) {
-      await enqueue(p);
-    }
+    await prefs.setString(_key, jsonEncode(kept));
   }
 }

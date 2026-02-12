@@ -6,12 +6,12 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../core/api_client.dart';
 import '../../data/local/punch_queue.dart';
+import '../../data/local/roster_cache.dart';
 import '../../data/models/punch.dart';
 import '../../data/models/status.dart';
 import '../../data/models/sync.dart';
 import '../../data/models/verify.dart';
 import '../../data/remote/timeclock_api.dart';
-import '../../data/local/roster_cache.dart';
 
 class TabletScreen extends StatefulWidget {
   const TabletScreen({super.key});
@@ -24,6 +24,7 @@ class _TabletScreenState extends State<TabletScreen> {
   late final TimeClockApi _api;
   final _queue = PunchQueue();
   final _rosterCache = RosterCache();
+  final _connectivity = Connectivity();
 
   // Kiosk entry
   String _employeeNumber = "";
@@ -40,16 +41,16 @@ class _TabletScreenState extends State<TabletScreen> {
   String? _message;
   int _pendingCount = 0;
 
-  // Device info (backend expects ints 1,2 etc.)
-  // Adjust these if your enums differ.
+  // Device info
   static const int deviceType = 1;
   static const String deviceId = "KIOSK-TEST-01";
 
-  // local sequence (simple in-memory counter for now)
+  // local sequence
   int _localSeq = 0;
   bool _forceOffline = false;
 
   Timer? _clockTimer;
+  Timer? _syncTimer;
   DateTime _now = DateTime.now();
 
   @override
@@ -59,15 +60,21 @@ class _TabletScreenState extends State<TabletScreen> {
 
     _refreshPending();
     _startClock();
+
+    // Warm roster so offline verify works
     _warmupRoster();
 
-    // optional: auto-sync attempt on launch
+    // Auto-sync every 30s (optional, but recommended)
+    _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) => _trySync());
+
+    // optional: one sync on launch
     _trySync();
   }
 
   @override
   void dispose() {
     _clockTimer?.cancel();
+    _syncTimer?.cancel();
     super.dispose();
   }
 
@@ -84,7 +91,7 @@ class _TabletScreenState extends State<TabletScreen> {
   void _appendDigit(String digit) {
     HapticFeedback.selectionClick();
     setState(() {
-      if (_employeeNumber.length >= 6) return; // 5-6 digits typical
+      if (_employeeNumber.length >= 6) return;
       _employeeNumber += digit;
     });
   }
@@ -93,8 +100,7 @@ class _TabletScreenState extends State<TabletScreen> {
     HapticFeedback.selectionClick();
     setState(() {
       if (_employeeNumber.isEmpty) return;
-      _employeeNumber =
-          _employeeNumber.substring(0, _employeeNumber.length - 1);
+      _employeeNumber = _employeeNumber.substring(0, _employeeNumber.length - 1);
     });
   }
 
@@ -103,8 +109,6 @@ class _TabletScreenState extends State<TabletScreen> {
     setState(() {
       _employeeNumber = "";
       _message = null;
-      // Do not clear verified state automatically, because “Clear” is keypad clear.
-      // If you want a full reset, use _resetSession().
     });
   }
 
@@ -120,36 +124,55 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   // ----------------------------
-  // OFFLINE + SYNC
+  // CONNECTIVITY
   // ----------------------------
-  Future<void> _refreshPending() async {
-    final c = await _queue.count();
-    setState(() => _pendingCount = c);
-  }
-
-  // For testing offline stacking:
-  // This simply treats network errors as "offline" and queues punches.
   Future<bool> _isOnline() async {
     if (_forceOffline) return false;
+    if (kIsWeb) return true;
+
+    final result = await _connectivity.checkConnectivity();
+    if (result == ConnectivityResult.none) return false;
 
     try {
-      await _api.ping(); // cheap GET
+      await _api.ping();
       return true;
     } catch (_) {
       return false;
     }
   }
 
+  // ----------------------------
+  // ROSTER CACHE (OFFLINE VERIFY)
+  // ----------------------------
   Future<void> _warmupRoster() async {
-  try {
-    if (!await _isOnline()) return;
-    final roster = await _api.rosterAll();
-    await _rosterCache.saveAll(roster.map((e) => e.toJson()).toList());
-  } catch (_) {
-    // silent
-  }
-}
+    try {
+      if (!await _isOnline()) return;
 
+      final items = await _api.rosterAll();
+      final json = items.map((e) => e.toJson()).toList();
+      await _rosterCache.saveAll(json);
+    } catch (_) {
+      // silent fail
+    }
+  }
+
+  void _applyVerified(VerifyResponse res, {required String message}) {
+    setState(() {
+      _verified = true;
+      _employeeGuid = res.employeeId;
+      _fullName = res.fullName;
+      _clockedIn = res.isClockedIn;
+      _message = message;
+    });
+  }
+
+  // ----------------------------
+  // OFFLINE QUEUE + SYNC
+  // ----------------------------
+  Future<void> _refreshPending() async {
+    final c = await _queue.count();
+    setState(() => _pendingCount = c);
+  }
 
   Future<void> _trySync() async {
     try {
@@ -189,12 +212,11 @@ class _TabletScreenState extends State<TabletScreen> {
         _message = "Synced ${result.processed} punch(es).";
       });
 
-      // refresh current employee status if a person is verified
       if (_employeeGuid != null) {
         await _loadStatus(_employeeGuid!);
       }
-    } catch (e) {
-      setState(() => _message = "Sync failed: $e");
+    } catch (_) {
+      // keep silent for kiosk UX
     }
   }
 
@@ -213,47 +235,40 @@ class _TabletScreenState extends State<TabletScreen> {
     });
 
     try {
-      // Verify by number (backend returns GUID + full name + optional clocked state)
-      final VerifyResponse result = await _api.verify(_employeeNumber);
+      // 1) ONLINE verify
+      if (await _isOnline()) {
+        await _warmupRoster();
 
-      // IMPORTANT:
-      // Your VerifyResponse must include:
-      // - employeeId (GUID string)
-      // - fullName (string)
-      // - isClockedIn (bool) OR we query status after verify
-      final guid = result.employeeId;
-      final fullName = result.fullName;
+        final res = await _api.verify(_employeeNumber);
 
-      bool clocked = false;
-      // If your verify response contains isClockedIn, use it:
-      // otherwise we fetch status
-      try {
-        clocked = result.isClockedIn;
-      } catch (_) {
-        // ignore if field doesn't exist
+        if (!res.isValid) {
+          setState(() => _message = "Invalid Employee ID");
+          return;
+        }
+
+        _applyVerified(res, message: "Verified.");
+        return;
       }
 
-      setState(() {
-        _verified = true;
-        _employeeGuid = guid;
-        _fullName = fullName;
-        _clockedIn = clocked;
-        _message = "Verified.";
-      });
+      // 2) OFFLINE verify via roster cache
+      final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
 
-      // If verify doesn't carry clocked-in state reliably, load it from status endpoint.
-      await _loadStatus(guid);
+      if (cached == null) {
+        setState(() => _message = "Employee not found (offline).");
+        return;
+      }
 
-      // Try syncing in the background for the kiosk (employees don't need to see this)
-      await _trySync();
-    } catch (e) {
-      setState(() {
-        _verified = false;
-        _employeeGuid = null;
-        _fullName = null;
-        _clockedIn = false;
-        _message = "Verify failed: $e";
-      });
+      final offlineRes = VerifyResponse(
+        isValid: true,
+        employeeId: cached.employeeId,
+        employeeNumber: cached.employeeNumber,
+        fullName: cached.fullName,
+        isClockedIn: false,
+      );
+
+      _applyVerified(offlineRes, message: "Verified (offline).");
+    } catch (_) {
+      setState(() => _message = "Verify failed");
     } finally {
       setState(() => _verifying = false);
     }
@@ -263,9 +278,8 @@ class _TabletScreenState extends State<TabletScreen> {
     try {
       final StatusResponse s = await _api.status(guid);
       setState(() => _clockedIn = s.isClockedIn);
-    } catch (e) {
-      // Don’t hard-fail kiosk, just show message
-      setState(() => _message = "Status check failed: $e");
+    } catch (_) {
+      // silent
     }
   }
 
@@ -283,7 +297,6 @@ class _TabletScreenState extends State<TabletScreen> {
     final punchType = _clockedIn ? 2 : 1;
     final seq = _localSeq++;
 
-    // Payload used for offline queue (and sync later)
     final queuedPayload = <String, dynamic>{
       "employeeId": _employeeGuid!,
       "punchType": punchType,
@@ -305,17 +318,14 @@ class _TabletScreenState extends State<TabletScreen> {
           localSequenceNumber: seq,
         ));
 
-        // refresh status
         await _loadStatus(_employeeGuid!);
 
         setState(() {
           _message = punchType == 1 ? "Clock In recorded." : "Clock Out recorded.";
         });
 
-        // reset for next employee
         _resetSession();
       } else {
-        // Offline: queue punch
         await _queue.enqueue(queuedPayload);
         await _refreshPending();
 
@@ -323,24 +333,18 @@ class _TabletScreenState extends State<TabletScreen> {
           _message = "Offline: Punch queued ($_pendingCount pending).";
         });
 
-        // flip local UI state so kiosk feels responsive even offline
         setState(() => _clockedIn = !_clockedIn);
-
-        // reset for next employee
         _resetSession();
       }
     } catch (e) {
-      // If online punch fails, queue it and continue
       await _queue.enqueue(queuedPayload);
       await _refreshPending();
 
       setState(() {
-        _message = "Punch queued ($_pendingCount pending). Error: $e";
+        _message = "Punch queued ($_pendingCount pending).";
       });
 
-      // flip local UI state to simulate the action
       setState(() => _clockedIn = !_clockedIn);
-
       _resetSession();
     } finally {
       setState(() => _punching = false);
@@ -348,7 +352,7 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   // ----------------------------
-  // UI
+  // UI (UNCHANGED DESIGN)
   // ----------------------------
   @override
   Widget build(BuildContext context) {
@@ -366,20 +370,12 @@ class _TabletScreenState extends State<TabletScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            // Main layout
             Padding(
               padding: const EdgeInsets.all(24),
               child: Row(
                 children: [
-                  // LEFT: keypad panel
-                  SizedBox(
-                    width: 420,
-                    child: _buildLeftPanel(canVerify),
-                  ),
-
+                  SizedBox(width: 420, child: _buildLeftPanel(canVerify)),
                   const SizedBox(width: 24),
-
-                  // RIGHT: clock + employee info + big action
                   Expanded(
                     child: _buildRightPanel(
                       timeStr: timeStr,
@@ -393,7 +389,6 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
             ),
 
-            // Top-left small status (kiosk-friendly)
             Positioned(
               left: 24,
               top: 10,
@@ -406,45 +401,44 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
             ),
 
-            // Top-right small sync indicator
-              Positioned(
-                right: 24,
-                top: 10,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextButton(
-                      onPressed: _trySync,
-                      child: Text(
-                        "Sync Now",
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.7),
-                          fontSize: 12,
-                        ),
+            Positioned(
+              right: 24,
+              top: 10,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextButton(
+                    onPressed: _trySync,
+                    child: Text(
+                      "Sync Now",
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.7),
+                        fontSize: 12,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () => setState(() => _forceOffline = !_forceOffline),
-                      child: Text(
-                        _forceOffline ? "OFFLINE: ON" : "OFFLINE: OFF",
-                        style: TextStyle(
-                          color: _forceOffline
-                              ? Colors.orange.withOpacity(0.9)
-                              : Colors.white.withOpacity(0.7),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () => setState(() => _forceOffline = !_forceOffline),
+                    child: Text(
+                      _forceOffline ? "OFFLINE: ON" : "OFFLINE: OFF",
+                      style: TextStyle(
+                        color: _forceOffline
+                            ? Colors.orange.withOpacity(0.9)
+                            : Colors.white.withOpacity(0.7),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-      );
-    }
+      ),
+    );
+  }
 
   Widget _buildLeftPanel(bool canVerify) {
     return Container(
@@ -456,7 +450,6 @@ class _TabletScreenState extends State<TabletScreen> {
       ),
       child: Column(
         children: [
-          // entry display
           Container(
             height: 64,
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -488,15 +481,9 @@ class _TabletScreenState extends State<TabletScreen> {
               ],
             ),
           ),
-
           const SizedBox(height: 14),
-
-          // keypad
           _buildKeypad(),
-
           const SizedBox(height: 14),
-
-          // verify button
           SizedBox(
             width: double.infinity,
             height: 56,
@@ -544,7 +531,6 @@ class _TabletScreenState extends State<TabletScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // safety message / header line
           Text(
             "HAVE YOU REMOVED YOUR LOCK TODAY?",
             textAlign: TextAlign.center,
@@ -555,10 +541,7 @@ class _TabletScreenState extends State<TabletScreen> {
               letterSpacing: 1,
             ),
           ),
-
           const SizedBox(height: 16),
-
-          // big clock
           Text(
             timeStr,
             textAlign: TextAlign.center,
@@ -578,10 +561,7 @@ class _TabletScreenState extends State<TabletScreen> {
               fontWeight: FontWeight.w700,
             ),
           ),
-
           const SizedBox(height: 24),
-
-          // employee info
           if (_verified && _fullName != null) ...[
             Text(
               _fullName!.toUpperCase(),
@@ -613,10 +593,7 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
             ),
           ],
-
           const Spacer(),
-
-          // punch button (big circle)
           Center(
             child: GestureDetector(
               onTap: canPunch ? _doPunch : null,
@@ -660,9 +637,7 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
             ),
           ),
-
           const SizedBox(height: 18),
-
           if (_message != null)
             Text(
               _message!,
@@ -673,7 +648,6 @@ class _TabletScreenState extends State<TabletScreen> {
                 fontWeight: FontWeight.w600,
               ),
             ),
-
           const SizedBox(height: 8),
         ],
       ),
@@ -681,10 +655,6 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   Widget _buildKeypad() {
-    // 1 2 3
-    // 4 5 6
-    // 7 8 9
-    // CLEAR 0 VERIFY (verify button also exists below, but we match your kiosk)
     return Column(
       children: [
         _keypadRow(["1", "2", "3"]),
