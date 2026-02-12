@@ -13,7 +13,7 @@ public class TimeClockDbContext : DbContext
 {
     public TimeClockDbContext(DbContextOptions<TimeClockDbContext> options) : base(options) { }
 
-    public DbSet<TimePunch> TimePunches => Set<TimePunch>();
+    public DbSet<TimePunch> TimePunches { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
