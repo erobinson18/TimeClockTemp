@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
 using TimeClock.Application.Commands;
 
@@ -10,6 +6,7 @@ namespace TimeClock.Application.Interfaces;
 
 public interface ITimePunchService
 {
-    Task CreateAsync(CreateTimePunchCommand command);
-    Task<bool> IsEmployeeClockedInAsync(string employeeId, CancellationToken ct);
+    Task CreateAsync(CreateTimePunchCommand command, CancellationToken ct = default);
+    Task<bool> IsEmployeeClockedInAsync(string employeeId, CancellationToken ct = default);
 }
+

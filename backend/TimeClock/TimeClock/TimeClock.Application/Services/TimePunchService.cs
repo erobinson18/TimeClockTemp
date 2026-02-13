@@ -1,6 +1,4 @@
-﻿using System.Threading;
-using System.Threading.Tasks;
-using TimeClock.Application.Commands;
+﻿using TimeClock.Application.Commands;
 using TimeClock.Application.Interfaces;
 using TimeClock.Domain.Entities;
 using TimeClock.Domain.Enums;
@@ -17,8 +15,11 @@ public sealed class TimePunchService : ITimePunchService
         _repository = repository;
     }
 
-    public async Task CreateAsync(CreateTimePunchCommand command)
+    public async Task CreateAsync(CreateTimePunchCommand command, CancellationToken ct = default)
     {
+        if (await _repository.ExistsAsync(command.EmployeeId, command.DeviceId, command.LocalSequenceNumber, ct))
+            return;
+
         var punch = new TimePunch(
             command.EmployeeId,
             command.PunchType,
@@ -29,7 +30,7 @@ public sealed class TimePunchService : ITimePunchService
             command.TimestampUtc
         );
 
-        await _repository.AddAsync(punch);
+        await _repository.AddAsync(punch, ct);
     }
 
     public async Task<bool> IsEmployeeClockedInAsync(string employeeId, CancellationToken ct)
@@ -41,11 +42,9 @@ public sealed class TimePunchService : ITimePunchService
             return false;
 
         var lastPunchType = await _repository.GetLastPunchTypeAsync(guid, ct);
-
         if (!lastPunchType.HasValue)
             return false;
 
-        return lastPunchType.Value == (int)PunchType.ClockIn
-               || lastPunchType.Value == 1;
+        return lastPunchType.Value == PunchType.ClockIn || (int)lastPunchType.Value == 1;
     }
 }

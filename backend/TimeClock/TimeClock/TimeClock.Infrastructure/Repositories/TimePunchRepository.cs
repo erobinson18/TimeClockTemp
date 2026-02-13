@@ -1,9 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+using TimeClock.Application.Interfaces;
 using TimeClock.Domain.Entities;
+using TimeClock.Domain.Enums;
 using TimeClock.Domain.Interfaces;
 using TimeClock.Infrastructure.Persistence;
 
@@ -18,22 +16,29 @@ public sealed class TimePunchRepository : ITimePunchRepository
         _db = db;
     }
 
-    public async Task AddAsync(TimePunch punch)
+    public async Task AddAsync(TimePunch punch, CancellationToken ct)
     {
         _db.TimePunches.Add(punch);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
     }
 
-    public async Task<int?> GetLastPunchTypeAsync(Guid employeeId, CancellationToken ct)
+    public async Task<PunchType?> GetLastPunchTypeAsync(Guid employeeId, CancellationToken ct)
     {
-        var lastPunchType = await _db.TimePunches
+        return await _db.TimePunches
             .AsNoTracking()
             .Where(p => p.EmployeeId == employeeId)
             .OrderByDescending(p => p.TimestampUtc)
             .ThenByDescending(p => p.LocalSequenceNumber)
-            .Select(p => (int?)p.PunchType)
+            .Select(p => (PunchType?)p.PunchType)
             .FirstOrDefaultAsync(ct);
+    }
 
-        return lastPunchType;
+    public async Task<bool> ExistsAsync(Guid employeeId, string deviceId, long localSequenceNumber, CancellationToken ct)
+    {
+        return await _db.TimePunches.AnyAsync(p =>
+            p.EmployeeId == employeeId &&
+            p.DeviceId == deviceId &&
+            p.LocalSequenceNumber == localSequenceNumber,
+            ct);
     }
 }
