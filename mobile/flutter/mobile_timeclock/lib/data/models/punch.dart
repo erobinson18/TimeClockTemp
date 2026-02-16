@@ -1,9 +1,11 @@
 class PunchRequest {
-  final String employeeId; // GUID string
-  final int punchType; // 1 for clock-in, 2 for clock-out
-  final int deviceType; // 1=Android/Web
+  final String employeeId;
+  final int punchType;
+  final int deviceType;
   final String deviceId;
   final int localSequenceNumber;
+
+  final DateTime timestampUtc;
   final double? latitude;
   final double? longitude;
 
@@ -13,17 +15,19 @@ class PunchRequest {
     required this.deviceType,
     required this.deviceId,
     required this.localSequenceNumber,
+    required this.timestampUtc,
     this.latitude,
     this.longitude,
   });
 
   Map<String, dynamic> toJson() => {
-        'employeeId': employeeId,
-        'punchType': punchType,
-        'deviceType': deviceType,
-        'deviceId': deviceId,
-        'localSequenceNumber': localSequenceNumber,
-        'latitude': latitude,
-        'longitude': longitude,
+        "employeeId": employeeId,
+        "punchType": punchType,
+        "deviceType": deviceType,
+        "deviceId": deviceId,
+        "localSequenceNumber": localSequenceNumber,
+        "timestampUtc": timestampUtc.toUtc().toIso8601String(),
+        "latitude": latitude,
+        "longitude": longitude,
       };
 }

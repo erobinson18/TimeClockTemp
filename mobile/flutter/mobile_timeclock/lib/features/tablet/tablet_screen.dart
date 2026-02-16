@@ -316,6 +316,7 @@ class _TabletScreenState extends State<TabletScreen> {
           deviceType: deviceType,
           deviceId: deviceId,
           localSequenceNumber: seq,
+          timestampUtc: DateTime.now().toUtc(),
         ));
 
         await _loadStatus(_employeeGuid!);

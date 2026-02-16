@@ -119,6 +119,7 @@ class _StatusScreenState extends State<StatusScreen> {
           deviceType: deviceType,
           deviceId: deviceId,
           localSequenceNumber: seq,
+          timestampUtc: DateTime.now().toUtc(),
         ));
 
         await _load();
