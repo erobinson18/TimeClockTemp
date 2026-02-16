@@ -1,8 +1,8 @@
-﻿using TimeClock.Domain.Enums;
-using TimeClock.Domain.Interfaces;
-using TimeClock.Domain.Entities;
+﻿using TimeClock.Application.Commands;
 using TimeClock.Application.Interfaces;
-using TimeClock.Application.Commands;
+using TimeClock.Domain.Entities;
+using TimeClock.Domain.Enums;
+using TimeClock.Domain.Interfaces;
 
 namespace TimeClock.Application.Services;
 
@@ -35,12 +35,16 @@ public sealed class TimePunchService : ITimePunchService
 
     public async Task<bool> IsEmployeeClockedInAsync(string employeeId, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(employeeId)) return false;
-        if (!Guid.TryParse(employeeId, out var guid)) return false;
+        if (string.IsNullOrWhiteSpace(employeeId))
+            return false;
+
+        if (!Guid.TryParse(employeeId, out var guid))
+            return false;
 
         var lastPunchType = await _repository.GetLastPunchTypeAsync(guid, ct);
+        if (!lastPunchType.HasValue)
+            return false;
 
-        // ✅ correct enum comparison
-        return lastPunchType == PunchType.ClockIn;
+        return lastPunchType.Value == PunchType.ClockIn;
     }
 }

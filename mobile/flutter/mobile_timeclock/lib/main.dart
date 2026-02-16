@@ -8,18 +8,18 @@ import 'features/status/status_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Hive.initFlutter(); // tablet storage
+  await Hive.initFlutter();
+
   await Hive.openBox('device');
   await Hive.openBox('punch_queue');
   await Hive.openBox('roster_cache');
+  await Hive.openBox('status_cache'); // ✅ NEW
 
-  // Kiosk default: Landscape only (Android + iOS)
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
 
-  // Optional: full-screen kiosk look (hides status/nav bars)
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
   runApp(const TimeClockApp());
@@ -32,19 +32,15 @@ class TimeClockApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: TabletScreen(),
 
-      // Shared theme across Android/iOS/Web (doesn’t change your TabletScreen widgets)
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: Colors.black,
         useMaterial3: true,
       ),
 
-      // Default screen (kiosk)
       initialRoute: Routes.tablet,
 
-      // Central routing so web/app can share the same structure later
       onGenerateRoute: (settings) {
         switch (settings.name) {
           case Routes.tablet:
@@ -92,10 +88,7 @@ class _RouteErrorScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Center(
-        child: Text(
-          message,
-          style: const TextStyle(color: Colors.white),
-        ),
+        child: Text(message, style: const TextStyle(color: Colors.white)),
       ),
     );
   }

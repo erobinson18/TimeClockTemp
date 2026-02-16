@@ -8,7 +8,7 @@ import '../../data/models/punch.dart';
 import '../../data/models/sync.dart';
 import '../../data/local/punch_queue.dart';
 import '../../data/local/local_seq_store.dart';
-
+import '../../data/local/status_cache.dart';
 
 class StatusScreen extends StatefulWidget {
   final String employeeGuid;
@@ -26,17 +26,15 @@ class _StatusScreenState extends State<StatusScreen> {
   bool _forceOffline = false;
   String? _msg;
 
-  // Adjust later if your enums differ:
   static const int deviceType = 1;
   static const String deviceId = "WEB-TEST-01";
 
-  int _localSeq = 0;
-
   final _queue = PunchQueue();
   final _connectivity = Connectivity();
-  int _pendingCount = 0;
-
   final _seqStore = LocalSeqStore();
+  final _statusCache = StatusCache();
+
+  int _pendingCount = 0;
 
   @override
   void initState() {
@@ -55,8 +53,15 @@ class _StatusScreenState extends State<StatusScreen> {
     try {
       final s = await _api.status(widget.employeeGuid);
       if (!mounted) return;
+
       setState(() => _clockedIn = s.isClockedIn);
+      await _statusCache.setIsClockedIn(widget.employeeGuid, s.isClockedIn);
     } catch (e) {
+      // fallback to cache so UI is not reversed
+      final cached = _statusCache.getIsClockedIn(widget.employeeGuid);
+      if (cached != null && mounted) {
+        setState(() => _clockedIn = cached);
+      }
       if (!mounted) return;
       setState(() => _msg = "Status failed: $e");
     } finally {
@@ -68,8 +73,6 @@ class _StatusScreenState extends State<StatusScreen> {
   Future<bool> _isOnline() async {
     if (_forceOffline) return false;
 
-    // Web: assume online (your backend is reachable if page loaded),
-    // but still allow ping to be the real source of truth.
     if (kIsWeb) {
       try {
         await _api.ping();
@@ -79,9 +82,8 @@ class _StatusScreenState extends State<StatusScreen> {
       }
     }
 
-    // Mobile/tablet: check network first, then ping API.
-    final result = await _connectivity.checkConnectivity();
-    if (result == ConnectivityResult.none) return false;
+    final results = await _connectivity.checkConnectivity();
+    if (results.contains(ConnectivityResult.none)) return false;
 
     try {
       await _api.ping();
@@ -103,17 +105,24 @@ class _StatusScreenState extends State<StatusScreen> {
       _loading = true;
     });
 
-    final int punchType = _clockedIn ? 2 : 1;
-    final int seq = await _seqStore.next();
+    // 0 = ClockIn, 1 = ClockOut
+    final int punchType = _clockedIn ? 1 : 0;
+    final int seq = _seqStore.next();
+    final nowUtc = DateTime.now().toUtc();
 
     final payload = <String, dynamic>{
       'employeeId': widget.employeeGuid,
       'punchType': punchType,
       'localSequenceNumber': seq,
-      'timestampUtc': DateTime.now().toUtc().toIso8601String(),
+      'timestampUtc': nowUtc.toIso8601String(),
       'latitude': null,
       'longitude': null,
     };
+
+    // optimistic UI (so button swaps immediately)
+    final bool newClockedIn = (punchType == 0);
+    setState(() => _clockedIn = newClockedIn);
+    await _statusCache.setIsClockedIn(widget.employeeGuid, newClockedIn);
 
     try {
       if (await _isOnline()) {
@@ -123,11 +132,10 @@ class _StatusScreenState extends State<StatusScreen> {
           deviceType: deviceType,
           deviceId: deviceId,
           localSequenceNumber: seq,
-          timestampUtc: DateTime.now().toUtc(),
+          timestampUtc: nowUtc,
         ));
 
-        if (mounted) setState(() => _clockedIn = !_clockedIn);
-
+        // confirm truth
         await Future.delayed(const Duration(milliseconds: 150));
         await _load();
       } else {
@@ -137,7 +145,7 @@ class _StatusScreenState extends State<StatusScreen> {
         setState(() => _msg = "Offline: Punch queued ($_pendingCount pending).");
       }
     } catch (e) {
-      // If online punch fails, queue it
+      // queue if failed
       await _queue.enqueue(payload);
       await _refreshPending();
       if (!mounted) return;
@@ -168,8 +176,7 @@ class _StatusScreenState extends State<StatusScreen> {
       final punches = pending.map((p) {
         final punchType = (p["punchType"] as num?)?.toInt() ?? 0;
         final localSeq = (p["localSequenceNumber"] as num?)?.toInt() ?? 0;
-        final ts = p["timestampUtc"] as String? ??
-            DateTime.now().toUtc().toIso8601String();
+        final ts = p["timestampUtc"] as String? ?? DateTime.now().toUtc().toIso8601String();
 
         return SyncPunch(
           employeeId: (p["employeeId"] as String?) ?? widget.employeeGuid,

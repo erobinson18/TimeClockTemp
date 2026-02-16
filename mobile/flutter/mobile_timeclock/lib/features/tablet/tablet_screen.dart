@@ -7,13 +7,14 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../core/api_client.dart';
 import '../../data/local/punch_queue.dart';
 import '../../data/local/roster_cache.dart';
+import '../../data/local/status_cache.dart';
+import '../../data/local/local_seq_store.dart';
+
 import '../../data/models/punch.dart';
 import '../../data/models/status.dart';
 import '../../data/models/sync.dart';
 import '../../data/models/verify.dart';
 import '../../data/remote/timeclock_api.dart';
-import '../../data/local/local_seq_store.dart';
-
 
 class TabletScreen extends StatefulWidget {
   const TabletScreen({super.key});
@@ -26,6 +27,7 @@ class _TabletScreenState extends State<TabletScreen> {
   late final TimeClockApi _api;
   final _queue = PunchQueue();
   final _rosterCache = RosterCache();
+  final _statusCache = StatusCache();
   final _connectivity = Connectivity();
   final _seqStore = LocalSeqStore();
 
@@ -36,20 +38,16 @@ class _TabletScreenState extends State<TabletScreen> {
 
   // Verified employee session
   bool _verified = false;
-  String? _employeeGuid; // GUID from verify response
+  String? _employeeGuid;
   String? _fullName;
   bool _clockedIn = false;
 
-  // UX
   String? _message;
   int _pendingCount = 0;
 
-  // Device info
   static const int deviceType = 1;
   static const String deviceId = "KIOSK-TEST-01";
 
-  // local sequence
-  int _localSeq = 0;
   bool _forceOffline = false;
 
   Timer? _clockTimer;
@@ -64,13 +62,9 @@ class _TabletScreenState extends State<TabletScreen> {
     _refreshPending();
     _startClock();
 
-    // Warm roster so offline verify works
     _warmupRoster();
 
-    // Auto-sync every 30s (optional, but recommended)
     _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) => _trySync());
-
-    // optional: one sync on launch
     _trySync();
   }
 
@@ -84,13 +78,10 @@ class _TabletScreenState extends State<TabletScreen> {
   void _startClock() {
     _clockTimer?.cancel();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      setState(() => _now = DateTime.now());
+      if (mounted) setState(() => _now = DateTime.now());
     });
   }
 
-  // ----------------------------
-  // KEYPAD INPUT
-  // ----------------------------
   void _appendDigit(String digit) {
     HapticFeedback.selectionClick();
     setState(() {
@@ -126,15 +117,19 @@ class _TabletScreenState extends State<TabletScreen> {
     });
   }
 
-  // ----------------------------
-  // CONNECTIVITY
-  // ----------------------------
   Future<bool> _isOnline() async {
     if (_forceOffline) return false;
-    if (kIsWeb) return true;
+    if (kIsWeb) {
+      try {
+        await _api.ping();
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
 
-    final result = await _connectivity.checkConnectivity();
-    if (result == ConnectivityResult.none) return false;
+    final results = await _connectivity.checkConnectivity();
+    if (results.contains(ConnectivityResult.none)) return false;
 
     try {
       await _api.ping();
@@ -144,9 +139,6 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-  // ----------------------------
-  // ROSTER CACHE (OFFLINE VERIFY)
-  // ----------------------------
   Future<void> _warmupRoster() async {
     try {
       if (!await _isOnline()) return;
@@ -155,7 +147,7 @@ class _TabletScreenState extends State<TabletScreen> {
       final json = items.map((e) => e.toJson()).toList();
       await _rosterCache.saveAll(json);
     } catch (_) {
-      // silent fail
+      // ignore
     }
   }
 
@@ -169,11 +161,9 @@ class _TabletScreenState extends State<TabletScreen> {
     });
   }
 
-  // ----------------------------
-  // OFFLINE QUEUE + SYNC
-  // ----------------------------
   Future<void> _refreshPending() async {
     final c = await _queue.count();
+    if (!mounted) return;
     setState(() => _pendingCount = c);
   }
 
@@ -187,11 +177,10 @@ class _TabletScreenState extends State<TabletScreen> {
       final punches = pending.map((p) {
         final punchType = (p["punchType"] as num?)?.toInt() ?? 0;
         final localSeq = (p["localSequenceNumber"] as num?)?.toInt() ?? 0;
-        final ts = p["timestampUtc"] as String? ??
-            DateTime.now().toUtc().toIso8601String();
+        final ts = p["timestampUtc"] as String? ?? DateTime.now().toUtc().toIso8601String();
 
         return SyncPunch(
-          employeeId: p["employeeId"] as String? ?? "",
+          employeeId: (p["employeeId"] as String?) ?? "",
           punchType: punchType,
           localSequenceNumber: localSeq,
           timestampUtc: DateTime.parse(ts),
@@ -211,78 +200,96 @@ class _TabletScreenState extends State<TabletScreen> {
       await _queue.removeByLocalSeq(result.acceptedSeq.toSet());
       await _refreshPending();
 
-      setState(() {
-        _message = "Synced ${result.processed} punch(es).";
-      });
+      if (!mounted) return;
+      setState(() => _message = "Synced ${result.processed} punch(es).");
 
       if (_employeeGuid != null) {
         await _loadStatus(_employeeGuid!);
       }
     } catch (_) {
-      // keep silent for kiosk UX
+      // kiosk: keep quiet
     }
   }
 
-  // ----------------------------
-  // VERIFY + STATUS + PUNCH
-  // ----------------------------
-  Future<void> _verifyEmployee() async {
-    if (_employeeNumber.isEmpty) {
-      setState(() => _message = "Enter your Employee ID.");
+Future<void> _verifyEmployee() async {
+  if (_employeeNumber.isEmpty) {
+    setState(() => _message = "Enter your Employee ID.");
+    return;
+  }
+
+  setState(() {
+    _verifying = true;
+    _message = null;
+  });
+
+  try {
+    if (await _isOnline()) {
+      await _warmupRoster();
+
+      final res = await _api.verify(_employeeNumber);
+
+      if (!res.isValid) {
+        setState(() => _message = "Invalid Employee ID");
+        return;
+      }
+
+      // ✅ FIX: employeeId is nullable in the model, so guard it
+      final guid = res.employeeId;
+      if (guid == null || guid.trim().isEmpty) {
+        setState(() => _message = "Verify failed: missing employee GUID.");
+        return;
+      }
+
+      _applyVerified(res, message: "Verified.");
+
+      // cache truth immediately
+      await _statusCache.setIsClockedIn(guid, res.isClockedIn);
+
+      // confirm via status endpoint (source of truth)
+      await _loadStatus(guid);
       return;
     }
 
-    setState(() {
-      _verifying = true;
-      _message = null;
-    });
-
-    try {
-      // 1) ONLINE verify
-      if (await _isOnline()) {
-        await _warmupRoster();
-
-        final res = await _api.verify(_employeeNumber);
-
-        if (!res.isValid) {
-          setState(() => _message = "Invalid Employee ID");
-          return;
-        }
-
-        _applyVerified(res, message: "Verified.");
-        return;
-      }
-
-      // 2) OFFLINE verify via roster cache
-      final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
-
-      if (cached == null) {
-        setState(() => _message = "Employee not found (offline).");
-        return;
-      }
-
-      final offlineRes = VerifyResponse(
-        isValid: true,
-        employeeId: cached.employeeId,
-        employeeNumber: cached.employeeNumber,
-        fullName: cached.fullName,
-        isClockedIn: false,
-      );
-
-      _applyVerified(offlineRes, message: "Verified (offline).");
-    } catch (_) {
-      setState(() => _message = "Verify failed");
-    } finally {
-      setState(() => _verifying = false);
+    // OFFLINE verify
+    final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
+    if (cached == null) {
+      setState(() => _message = "Employee not found (offline).");
+      return;
     }
+
+    final cachedClockedIn =
+        _statusCache.getIsClockedIn(cached.employeeId) ?? false;
+
+    final offlineRes = VerifyResponse(
+      isValid: true,
+      employeeId: cached.employeeId,
+      employeeNumber: cached.employeeNumber,
+      fullName: cached.fullName,
+      isClockedIn: cachedClockedIn,
+    );
+
+    _applyVerified(offlineRes, message: "Verified (offline).");
+  } catch (_) {
+    setState(() => _message = "Verify failed");
+  } finally {
+    if (!mounted) return;
+    setState(() => _verifying = false);
   }
+}
+
 
   Future<void> _loadStatus(String guid) async {
     try {
       final StatusResponse s = await _api.status(guid);
+      if (!mounted) return;
       setState(() => _clockedIn = s.isClockedIn);
+      await _statusCache.setIsClockedIn(guid, s.isClockedIn);
     } catch (_) {
-      // silent
+      // fallback cache
+      final cached = _statusCache.getIsClockedIn(guid);
+      if (cached != null && mounted) {
+        setState(() => _clockedIn = cached);
+      }
     }
   }
 
@@ -297,17 +304,27 @@ class _TabletScreenState extends State<TabletScreen> {
       _message = null;
     });
 
-    final punchType = _clockedIn ? 2 : 1;
-    final int seq = await _seqStore.next();
+    // 0 = ClockIn, 1 = ClockOut
+    final punchType = _clockedIn ? 1 : 0;
+    final seq = _seqStore.next();
+    final nowUtc = DateTime.now().toUtc();
 
     final queuedPayload = <String, dynamic>{
       "employeeId": _employeeGuid!,
       "punchType": punchType,
       "localSequenceNumber": seq,
-      "timestampUtc": DateTime.now().toUtc().toIso8601String(),
+      "timestampUtc": nowUtc.toIso8601String(),
       "latitude": null,
       "longitude": null,
     };
+
+    // optimistic toggle
+    final newClockedIn = (punchType == 0);
+    setState(() {
+      _clockedIn = newClockedIn;
+      _message = (punchType == 0) ? "Clock In recorded." : "Clock Out recorded.";
+    });
+    await _statusCache.setIsClockedIn(_employeeGuid!, newClockedIn);
 
     try {
       final online = await _isOnline();
@@ -319,49 +336,36 @@ class _TabletScreenState extends State<TabletScreen> {
           deviceType: deviceType,
           deviceId: deviceId,
           localSequenceNumber: seq,
-          timestampUtc: DateTime.now().toUtc(),
+          timestampUtc: nowUtc,
         ));
 
         await Future.delayed(const Duration(milliseconds: 150));
         await _loadStatus(_employeeGuid!);
 
-        setState(() {
-          _clockedIn = !_clockedIn;
-          _message = punchType == 1 ? "Clock In recorded." : "Clock Out recorded.";
-        });
-
         Future.delayed(const Duration(seconds: 2), _resetSession);
-
-        _resetSession();
       } else {
         await _queue.enqueue(queuedPayload);
         await _refreshPending();
 
-        setState(() {
-          _message = "Offline: Punch queued ($_pendingCount pending).";
-        });
+        if (!mounted) return;
+        setState(() => _message = "Offline: Punch queued ($_pendingCount pending).");
 
-        setState(() => _clockedIn = !_clockedIn);
-        _resetSession();
+        Future.delayed(const Duration(seconds: 2), _resetSession);
       }
-    } catch (e) {
+    } catch (_) {
       await _queue.enqueue(queuedPayload);
       await _refreshPending();
 
-      setState(() {
-        _message = "Punch queued ($_pendingCount pending).";
-      });
+      if (!mounted) return;
+      setState(() => _message = "Punch queued ($_pendingCount pending).");
 
-      setState(() => _clockedIn = !_clockedIn);
-      _resetSession();
+      Future.delayed(const Duration(seconds: 2), _resetSession);
     } finally {
+      if (!mounted) return;
       setState(() => _punching = false);
     }
   }
 
-  // ----------------------------
-  // UI (UNCHANGED DESIGN)
-  // ----------------------------
   @override
   Widget build(BuildContext context) {
     final timeStr = _formatTime(_now);
@@ -396,7 +400,6 @@ class _TabletScreenState extends State<TabletScreen> {
                 ],
               ),
             ),
-
             Positioned(
               left: 24,
               top: 10,
@@ -408,7 +411,6 @@ class _TabletScreenState extends State<TabletScreen> {
                 ),
               ),
             ),
-
             Positioned(
               right: 24,
               top: 10,
@@ -627,10 +629,7 @@ class _TabletScreenState extends State<TabletScreen> {
                       ? const SizedBox(
                           width: 28,
                           height: 28,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 3,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
+                          child: CircularProgressIndicator(strokeWidth: 3),
                         )
                       : Text(
                           actionText,
@@ -701,14 +700,7 @@ class _TabletScreenState extends State<TabletScreen> {
   Widget _keypadRow(List<String> labels) {
     return Row(
       children: labels
-          .map(
-            (l) => Expanded(
-              child: _keyButton(
-                label: l,
-                onTap: () => _appendDigit(l),
-              ),
-            ),
-          )
+          .map((l) => Expanded(child: _keyButton(label: l, onTap: () => _appendDigit(l))))
           .toList(),
     );
   }
@@ -753,31 +745,15 @@ class _TabletScreenState extends State<TabletScreen> {
     h = h % 12;
     if (h == 0) h = 12;
     return "$h:$m $ampm";
-  }
+    }
 
   String _formatDate(DateTime dt) {
     const months = [
-      "January",
-      "February",
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December"
+      "January","February","March","April","May","June",
+      "July","August","September","October","November","December"
     ];
     const days = [
-      "Monday",
-      "Tuesday",
-      "Wednesday",
-      "Thursday",
-      "Friday",
-      "Saturday",
-      "Sunday"
+      "Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"
     ];
     final dayName = days[dt.weekday - 1];
     final monthName = months[dt.month - 1];

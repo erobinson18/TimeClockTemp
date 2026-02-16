@@ -16,11 +16,11 @@ public sealed class EmployeeStatusService : IEmployeeStatusService
 
     public async Task<EmployeeStatusDto> GetStatusAsync(string employeeId, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(employeeId)) 
-            return new EmployeeStatusDto { IsClockedIn = false };
+        if (string.IsNullOrWhiteSpace(employeeId))
+            return new EmployeeStatusDto { IsClockedIn = false, LastPunchType = null };
 
         if (!Guid.TryParse(employeeId, out var empGuid))
-            return new EmployeeStatusDto { IsClockedIn = false };
+            return new EmployeeStatusDto { IsClockedIn = false, LastPunchType = null };
 
         var last = await _repo.GetLastPunchTypeAsync(empGuid, ct);
 

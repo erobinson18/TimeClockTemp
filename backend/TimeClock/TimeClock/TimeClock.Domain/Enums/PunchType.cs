@@ -8,7 +8,7 @@ namespace TimeClock.Domain.Enums
 {
 public enum PunchType
     {
-        ClockIn = 1,
-        ClockOut = 2,
+        ClockIn = 0,
+        ClockOut = 1,
     }
 }

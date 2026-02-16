@@ -1,6 +1,9 @@
 class PunchRequest {
   final String employeeId;
+
+  /// 0 = ClockIn, 1 = ClockOut
   final int punchType;
+
   final int deviceType;
   final String deviceId;
   final int localSequenceNumber;

@@ -1,37 +1,37 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Cryptography.X509Certificates;
-using System.Text;
-using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using TimeClock.Domain.Entities;
+using TimeClock.Domain.ValueObjects;
 
-namespace TimeClock.Infrastructure.Persistence;
+namespace TimeClock.Infrastructure;
 
-public class TimeClockDbContext : DbContext
+public sealed class TimeClockDbContext : DbContext
 {
-    public TimeClockDbContext(DbContextOptions<TimeClockDbContext> options) : base(options) { }
+    public TimeClockDbContext(DbContextOptions<TimeClockDbContext> options)
+        : base(options) { }
 
-    public DbSet<TimePunch> TimePunches { get; set; }
+    public DbSet<TimePunch> TimePunches => Set<TimePunch>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.Entity<TimePunch>(entity =>
+        modelBuilder.Entity<TimePunch>(b =>
         {
-            entity.OwnsOne(p => p.Location, owned =>
-            {
-                owned.Property(x => x.Latitude)
-                     .HasColumnName("Latitude");
+            b.ToTable("TimePunches");
 
-                owned.Property(x => x.Longitude)
-                     .HasColumnName("Longitude");
+            b.HasKey(x => x.Id);
+
+            b.HasIndex(x => new { x.EmployeeId, x.DeviceId, x.LocalSequenceNumber })
+             .IsUnique();
+
+            b.OwnsOne(x => x.Location, owned =>
+            {
+                owned.Property(p => p.Latitude).HasColumnName("Latitude");
+                owned.Property(p => p.Longitude).HasColumnName("Longitude");
             });
 
-            entity.Navigation(p => p.Location)
-                  .IsRequired(false);
+            // Optional: if Location can be null
+            b.Navigation(x => x.Location).IsRequired(false);
         });
     }
 }
