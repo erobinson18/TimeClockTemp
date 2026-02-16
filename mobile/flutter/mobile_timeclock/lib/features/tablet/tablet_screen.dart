@@ -12,6 +12,8 @@ import '../../data/models/status.dart';
 import '../../data/models/sync.dart';
 import '../../data/models/verify.dart';
 import '../../data/remote/timeclock_api.dart';
+import '../../data/local/local_seq_store.dart';
+
 
 class TabletScreen extends StatefulWidget {
   const TabletScreen({super.key});
@@ -25,6 +27,7 @@ class _TabletScreenState extends State<TabletScreen> {
   final _queue = PunchQueue();
   final _rosterCache = RosterCache();
   final _connectivity = Connectivity();
+  final _seqStore = LocalSeqStore();
 
   // Kiosk entry
   String _employeeNumber = "";
@@ -295,7 +298,7 @@ class _TabletScreenState extends State<TabletScreen> {
     });
 
     final punchType = _clockedIn ? 2 : 1;
-    final seq = _localSeq++;
+    final seq = _seqStore.next();
 
     final queuedPayload = <String, dynamic>{
       "employeeId": _employeeGuid!,
@@ -319,11 +322,15 @@ class _TabletScreenState extends State<TabletScreen> {
           timestampUtc: DateTime.now().toUtc(),
         ));
 
+        await Future.delayed(const Duration(milliseconds: 150));
         await _loadStatus(_employeeGuid!);
 
         setState(() {
+          _clockedIn = !_clockedIn;
           _message = punchType == 1 ? "Clock In recorded." : "Clock Out recorded.";
         });
+
+        Future.delayed(const Duration(seconds: 2), _resetSession);
 
         _resetSession();
       } else {

@@ -11,7 +11,5 @@ namespace TimeClock.Application.Interfaces;
 
 public interface IEmployeeStatusService
 {
-    Task<bool> IsEmployeeClockedInAsync(string employeeId, CancellationToken ct);
-
     Task<EmployeeStatusDto> GetStatusAsync(string employeeId, CancellationToken ct);
 }

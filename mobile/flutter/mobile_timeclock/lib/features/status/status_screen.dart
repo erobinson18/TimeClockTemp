@@ -7,6 +7,8 @@ import '../../data/remote/timeclock_api.dart';
 import '../../data/models/punch.dart';
 import '../../data/models/sync.dart';
 import '../../data/local/punch_queue.dart';
+import '../../data/local/local_seq_store.dart';
+
 
 class StatusScreen extends StatefulWidget {
   final String employeeGuid;
@@ -33,6 +35,8 @@ class _StatusScreenState extends State<StatusScreen> {
   final _queue = PunchQueue();
   final _connectivity = Connectivity();
   int _pendingCount = 0;
+
+  final _seqStore = LocalSeqStore();
 
   @override
   void initState() {
@@ -100,7 +104,7 @@ class _StatusScreenState extends State<StatusScreen> {
     });
 
     final int punchType = _clockedIn ? 2 : 1;
-    final int seq = _localSeq++;
+    final int seq = _seqStore.next();
 
     final payload = <String, dynamic>{
       'employeeId': widget.employeeGuid,
@@ -122,6 +126,9 @@ class _StatusScreenState extends State<StatusScreen> {
           timestampUtc: DateTime.now().toUtc(),
         ));
 
+        if (mounted) setState(() => _clockedIn = !_clockedIn);
+
+        await Future.delayed(const Duration(milliseconds: 150));
         await _load();
       } else {
         await _queue.enqueue(payload);

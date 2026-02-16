@@ -1,6 +1,19 @@
 @TimeClock.Api_HostAddress = http://localhost:5160
 
-GET {{TimeClock.Api_HostAddress}}/weatherforecast/
-Accept: application/json
+### Ping
+GET {{TimeClock.Api_HostAddress}}/api/health/ping
 
-###
+### Status (replace GUID)
+GET {{TimeClock.Api_HostAddress}}/api/status/PUT-EMPLOYEE-GUID-HERE
+
+### Punch IN (example)
+POST {{TimeClock.Api_HostAddress}}/api/punch
+Content-Type: application/json
+
+{
+  "employeeId": "PUT-EMPLOYEE-GUID-HERE",
+  "punchType": 1,
+  "deviceType": 1,
+  "deviceId": "WEB-TEST-01",
+  "localSequenceNumber": 12345
+}

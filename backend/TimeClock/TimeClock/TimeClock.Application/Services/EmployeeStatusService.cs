@@ -1,34 +1,33 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using TimeClock.Application.DTOs;
+﻿using TimeClock.Application.DTOs;
 using TimeClock.Application.Interfaces;
+using TimeClock.Domain.Enums;
+using TimeClock.Domain.Interfaces;
 
 namespace TimeClock.Application.Services;
 
 public sealed class EmployeeStatusService : IEmployeeStatusService
 {
-    private readonly ITimePunchService _punchService;
+    private readonly ITimePunchRepository _repo;
 
-    public EmployeeStatusService(ITimePunchService punchService)
+    public EmployeeStatusService(ITimePunchRepository repo)
     {
-        _punchService = punchService;
+        _repo = repo;
     }
-
-    public Task<bool> IsEmployeeClockedInAsync(string employeeId, CancellationToken ct)
-        => _punchService.IsEmployeeClockedInAsync(employeeId, ct);
 
     public async Task<EmployeeStatusDto> GetStatusAsync(string employeeId, CancellationToken ct)
     {
-        var clockedIn = await _punchService.IsEmployeeClockedInAsync(employeeId, ct);
+        if (string.IsNullOrWhiteSpace(employeeId)) 
+            return new EmployeeStatusDto { IsClockedIn = false };
+
+        if (!Guid.TryParse(employeeId, out var empGuid))
+            return new EmployeeStatusDto { IsClockedIn = false };
+
+        var last = await _repo.GetLastPunchTypeAsync(empGuid, ct);
 
         return new EmployeeStatusDto
         {
-            EmployeeId = employeeId,
-            IsClockedIn = clockedIn
+            IsClockedIn = (last == PunchType.ClockIn),
+            LastPunchType = last
         };
     }
 }
