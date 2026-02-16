@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace TimeClock.Domain.ValueObjects;
 
-public class GeoCoordinate
+public sealed class GeoCoordinate
 {
     public double Latitude { get; private set; }
     public double Longitude { get; private set; }

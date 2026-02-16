@@ -19,8 +19,19 @@ public class TimeClockDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.Entity<TimePunch>()
-            .HasIndex(p => new { p.EmployeeId, p.DeviceId, p.LocalSequenceNumber })
-            .IsUnique();
+        modelBuilder.Entity<TimePunch>(entity =>
+        {
+            entity.OwnsOne(p => p.Location, owned =>
+            {
+                owned.Property(x => x.Latitude)
+                     .HasColumnName("Latitude");
+
+                owned.Property(x => x.Longitude)
+                     .HasColumnName("Longitude");
+            });
+
+            entity.Navigation(p => p.Location)
+                  .IsRequired(false);
+        });
     }
 }
