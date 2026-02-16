@@ -298,7 +298,7 @@ class _TabletScreenState extends State<TabletScreen> {
     });
 
     final punchType = _clockedIn ? 2 : 1;
-    final seq = _seqStore.next();
+    final int seq = await _seqStore.next();
 
     final queuedPayload = <String, dynamic>{
       "employeeId": _employeeGuid!,

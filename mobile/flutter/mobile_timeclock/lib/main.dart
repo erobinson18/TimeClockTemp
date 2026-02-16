@@ -10,6 +10,8 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter(); // tablet storage
   await Hive.openBox('device');
+  await Hive.openBox('punch_queue');
+  await Hive.openBox('roster_cache');
 
   // Kiosk default: Landscape only (Android + iOS)
   await SystemChrome.setPreferredOrientations([
@@ -30,6 +32,7 @@ class TimeClockApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      home: TabletScreen(),
 
       // Shared theme across Android/iOS/Web (doesn’t change your TabletScreen widgets)
       theme: ThemeData(

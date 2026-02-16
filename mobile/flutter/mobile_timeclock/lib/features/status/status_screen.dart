@@ -104,7 +104,7 @@ class _StatusScreenState extends State<StatusScreen> {
     });
 
     final int punchType = _clockedIn ? 2 : 1;
-    final int seq = _seqStore.next();
+    final int seq = await _seqStore.next();
 
     final payload = <String, dynamic>{
       'employeeId': widget.employeeGuid,
