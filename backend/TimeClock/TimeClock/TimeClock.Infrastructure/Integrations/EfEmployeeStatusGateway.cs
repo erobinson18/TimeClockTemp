@@ -7,7 +7,6 @@ using Microsoft.EntityFrameworkCore;
 using TimeClock.Application.Integrations;
 using TimeClock.Application.Integrations.Models;
 using TimeClock.Domain.Enums;
-using TimeClock.Infrastructure.Persistence;
 
 namespace TimeClock.Infrastructure.Integrations;
 

@@ -119,6 +119,7 @@ class _TabletScreenState extends State<TabletScreen> {
 
   Future<bool> _isOnline() async {
     if (_forceOffline) return false;
+
     if (kIsWeb) {
       try {
         await _api.ping();
@@ -177,7 +178,8 @@ class _TabletScreenState extends State<TabletScreen> {
       final punches = pending.map((p) {
         final punchType = (p["punchType"] as num?)?.toInt() ?? 0;
         final localSeq = (p["localSequenceNumber"] as num?)?.toInt() ?? 0;
-        final ts = p["timestampUtc"] as String? ?? DateTime.now().toUtc().toIso8601String();
+        final ts = p["timestampUtc"] as String? ??
+            DateTime.now().toUtc().toIso8601String();
 
         return SyncPunch(
           employeeId: (p["employeeId"] as String?) ?? "",
@@ -211,72 +213,71 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-Future<void> _verifyEmployee() async {
-  if (_employeeNumber.isEmpty) {
-    setState(() => _message = "Enter your Employee ID.");
-    return;
-  }
-
-  setState(() {
-    _verifying = true;
-    _message = null;
-  });
-
-  try {
-    if (await _isOnline()) {
-      await _warmupRoster();
-
-      final res = await _api.verify(_employeeNumber);
-
-      if (!res.isValid) {
-        setState(() => _message = "Invalid Employee ID");
-        return;
-      }
-
-      // ✅ FIX: employeeId is nullable in the model, so guard it
-      final guid = res.employeeId;
-      if (guid == null || guid.trim().isEmpty) {
-        setState(() => _message = "Verify failed: missing employee GUID.");
-        return;
-      }
-
-      _applyVerified(res, message: "Verified.");
-
-      // cache truth immediately
-      await _statusCache.setIsClockedIn(guid, res.isClockedIn);
-
-      // confirm via status endpoint (source of truth)
-      await _loadStatus(guid);
+  // ✅ FIXED: no more passing String? into StatusCache or _loadStatus
+  Future<void> _verifyEmployee() async {
+    if (_employeeNumber.isEmpty) {
+      setState(() => _message = "Enter your Employee ID.");
       return;
     }
 
-    // OFFLINE verify
-    final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
-    if (cached == null) {
-      setState(() => _message = "Employee not found (offline).");
-      return;
+    setState(() {
+      _verifying = true;
+      _message = null;
+    });
+
+    try {
+      if (await _isOnline()) {
+        await _warmupRoster();
+
+        final res = await _api.verify(_employeeNumber);
+
+        if (!res.isValid) {
+          setState(() => _message = "Invalid Employee ID");
+          return;
+        }
+
+        final guid = res.employeeId;
+        if (guid == null || guid.trim().isEmpty) {
+          setState(() => _message = "Verify failed: missing employee GUID.");
+          return;
+        }
+
+        _applyVerified(res, message: "Verified.");
+
+        // ✅ Use guid (non-null), not res.employeeId (nullable)
+        await _statusCache.setIsClockedIn(guid, res.isClockedIn);
+
+        // ✅ Use guid (non-null), not res.employeeId (nullable)
+        await _loadStatus(guid);
+        return;
+      }
+
+      // OFFLINE verify
+      final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
+      if (cached == null) {
+        setState(() => _message = "Employee not found (offline).");
+        return;
+      }
+
+      final cachedClockedIn =
+          _statusCache.getIsClockedIn(cached.employeeId) ?? false;
+
+      final offlineRes = VerifyResponse(
+        isValid: true,
+        employeeId: cached.employeeId,
+        employeeNumber: cached.employeeNumber,
+        fullName: cached.fullName,
+        isClockedIn: cachedClockedIn,
+      );
+
+      _applyVerified(offlineRes, message: "Verified (offline).");
+    } catch (_) {
+      setState(() => _message = "Verify failed");
+    } finally {
+      if (!mounted) return;
+      setState(() => _verifying = false);
     }
-
-    final cachedClockedIn =
-        _statusCache.getIsClockedIn(cached.employeeId) ?? false;
-
-    final offlineRes = VerifyResponse(
-      isValid: true,
-      employeeId: cached.employeeId,
-      employeeNumber: cached.employeeNumber,
-      fullName: cached.fullName,
-      isClockedIn: cachedClockedIn,
-    );
-
-    _applyVerified(offlineRes, message: "Verified (offline).");
-  } catch (_) {
-    setState(() => _message = "Verify failed");
-  } finally {
-    if (!mounted) return;
-    setState(() => _verifying = false);
   }
-}
-
 
   Future<void> _loadStatus(String guid) async {
     try {
@@ -285,7 +286,6 @@ Future<void> _verifyEmployee() async {
       setState(() => _clockedIn = s.isClockedIn);
       await _statusCache.setIsClockedIn(guid, s.isClockedIn);
     } catch (_) {
-      // fallback cache
       final cached = _statusCache.getIsClockedIn(guid);
       if (cached != null && mounted) {
         setState(() => _clockedIn = cached);
@@ -348,7 +348,8 @@ Future<void> _verifyEmployee() async {
         await _refreshPending();
 
         if (!mounted) return;
-        setState(() => _message = "Offline: Punch queued ($_pendingCount pending).");
+        setState(() =>
+            _message = "Offline: Punch queued ($_pendingCount pending).");
 
         Future.delayed(const Duration(seconds: 2), _resetSession);
       }
@@ -429,7 +430,8 @@ Future<void> _verifyEmployee() async {
                   ),
                   const SizedBox(width: 8),
                   TextButton(
-                    onPressed: () => setState(() => _forceOffline = !_forceOffline),
+                    onPressed: () =>
+                        setState(() => _forceOffline = !_forceOffline),
                     child: Text(
                       _forceOffline ? "OFFLINE: ON" : "OFFLINE: OFF",
                       style: TextStyle(
@@ -450,6 +452,7 @@ Future<void> _verifyEmployee() async {
     );
   }
 
+  // UI helpers below unchanged
   Widget _buildLeftPanel(bool canVerify) {
     return Container(
       padding: const EdgeInsets.all(18),
@@ -700,7 +703,12 @@ Future<void> _verifyEmployee() async {
   Widget _keypadRow(List<String> labels) {
     return Row(
       children: labels
-          .map((l) => Expanded(child: _keyButton(label: l, onTap: () => _appendDigit(l))))
+          .map((l) => Expanded(
+                child: _keyButton(
+                  label: l,
+                  onTap: () => _appendDigit(l),
+                ),
+              ))
           .toList(),
     );
   }
@@ -745,7 +753,7 @@ Future<void> _verifyEmployee() async {
     h = h % 12;
     if (h == 0) h = 12;
     return "$h:$m $ampm";
-    }
+  }
 
   String _formatDate(DateTime dt) {
     const months = [

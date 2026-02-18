@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace TimeClock.Infrastructure.Repositories
+namespace TimeClock.Infrastructure.Persistence.Repositories
 {
-    internal class EmployeeRepository
+    internal class WorkSiteRepository
     {
     }
 }

@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TimeClock.Infrastructure.Persistence;
+using TimeClock.Infrastructure;
 
 namespace TimeClock.Api.Controllers;
 

@@ -6,12 +6,11 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using TimeClock.Domain.Interfaces;
-using TimeClock.Infrastructure.Persistence;
-using TimeClock.Infrastructure.Repositories;
 using TimeClock.Application.Integrations;
 using TimeClock.Infrastructure.Integrations;
 using TimeClock.Application.Services;
 using TimeClock.Application.Interfaces;
+using TimeClock.Infrastructure.Persistence.Repositories;
 
 namespace TimeClock.Infrastructure;
 
