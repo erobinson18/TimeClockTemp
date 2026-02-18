@@ -383,7 +383,7 @@ class _TabletScreenState extends State<TabletScreen> {
         // - then set UI/cache to that returned value (no extra /status call)
         //
         // For now, we trust the local toggle and rely on Verify/Sync to reconcile.
-        Future.delayed(const Duration(seconds: 2), _resetSession);
+        Future.delayed(const Duration(milliseconds: 900), _resetSession);
       } else {
         // Offline: queue it
         await _queue.enqueue(queuedPayload);
@@ -392,7 +392,7 @@ class _TabletScreenState extends State<TabletScreen> {
         if (!mounted) return;
         setState(() => _message = "Offline: Punch queued ($_pendingCount pending).");
 
-        Future.delayed(const Duration(seconds: 2), _resetSession);
+        Future.delayed(const Duration(milliseconds: 900), _resetSession);
       }
     } catch (e) {
       // If online punch fails, queue it (same behavior as offline mode)
@@ -402,7 +402,7 @@ class _TabletScreenState extends State<TabletScreen> {
       if (!mounted) return;
       setState(() => _message = "Punch queued ($_pendingCount pending).");
 
-      Future.delayed(const Duration(seconds: 2), _resetSession);
+      Future.delayed(const Duration(milliseconds: 900), _resetSession);
     } finally {
       if (!mounted) return;
       setState(() => _punching = false);
