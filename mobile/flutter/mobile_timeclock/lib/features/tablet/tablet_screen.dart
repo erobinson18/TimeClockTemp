@@ -38,13 +38,15 @@ class _TabletScreenState extends State<TabletScreen> {
 
   // Verified employee session
   bool _verified = false;
-  String? _employeeGuid;
+  String? _employeeGuid; // GUID from verify response
   String? _fullName;
   bool _clockedIn = false;
 
+  // UX
   String? _message;
   int _pendingCount = 0;
 
+  // Device info
   static const int deviceType = 1;
   static const String deviceId = "KIOSK-TEST-01";
 
@@ -62,9 +64,13 @@ class _TabletScreenState extends State<TabletScreen> {
     _refreshPending();
     _startClock();
 
+    // Warm roster so offline verify works
     _warmupRoster();
 
+    // Auto-sync every 30s (optional, but recommended)
     _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) => _trySync());
+
+    // optional: one sync on launch
     _trySync();
   }
 
@@ -82,6 +88,9 @@ class _TabletScreenState extends State<TabletScreen> {
     });
   }
 
+  // ----------------------------
+  // KEYPAD INPUT
+  // ----------------------------
   void _appendDigit(String digit) {
     HapticFeedback.selectionClick();
     setState(() {
@@ -117,9 +126,13 @@ class _TabletScreenState extends State<TabletScreen> {
     });
   }
 
+  // ----------------------------
+  // CONNECTIVITY
+  // ----------------------------
   Future<bool> _isOnline() async {
     if (_forceOffline) return false;
 
+    // Web: rely on ping for reachability
     if (kIsWeb) {
       try {
         await _api.ping();
@@ -140,6 +153,9 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
+  // ----------------------------
+  // ROSTER CACHE (OFFLINE VERIFY)
+  // ----------------------------
   Future<void> _warmupRoster() async {
     try {
       if (!await _isOnline()) return;
@@ -148,7 +164,7 @@ class _TabletScreenState extends State<TabletScreen> {
       final json = items.map((e) => e.toJson()).toList();
       await _rosterCache.saveAll(json);
     } catch (_) {
-      // ignore
+      // silent fail
     }
   }
 
@@ -162,6 +178,9 @@ class _TabletScreenState extends State<TabletScreen> {
     });
   }
 
+  // ----------------------------
+  // OFFLINE QUEUE + SYNC
+  // ----------------------------
   Future<void> _refreshPending() async {
     final c = await _queue.count();
     if (!mounted) return;
@@ -199,21 +218,26 @@ class _TabletScreenState extends State<TabletScreen> {
 
       final result = await _api.syncBatch(batch);
 
+      // Remove only the seqs the backend accepted.
+      // Hook point: if your real backend returns per-punch errors, handle rejects here.
       await _queue.removeByLocalSeq(result.acceptedSeq.toSet());
       await _refreshPending();
 
       if (!mounted) return;
       setState(() => _message = "Synced ${result.processed} punch(es).");
 
+      // After sync, refresh server truth for the currently verified employee (if any).
       if (_employeeGuid != null) {
         await _loadStatus(_employeeGuid!);
       }
     } catch (_) {
-      // kiosk: keep quiet
+      // keep silent for kiosk UX
     }
   }
 
-  // ✅ FIXED: no more passing String? into StatusCache or _loadStatus
+  // ----------------------------
+  // VERIFY + STATUS + PUNCH
+  // ----------------------------
   Future<void> _verifyEmployee() async {
     if (_employeeNumber.isEmpty) {
       setState(() => _message = "Enter your Employee ID.");
@@ -226,6 +250,7 @@ class _TabletScreenState extends State<TabletScreen> {
     });
 
     try {
+      // 1) ONLINE verify
       if (await _isOnline()) {
         await _warmupRoster();
 
@@ -244,21 +269,23 @@ class _TabletScreenState extends State<TabletScreen> {
 
         _applyVerified(res, message: "Verified.");
 
-        // ✅ Use guid (non-null), not res.employeeId (nullable)
+        // Hook point: for your real backend, Verify might NOT be source-of-truth for punch state.
+        // We still cache it, but we immediately confirm using /status (truth).
         await _statusCache.setIsClockedIn(guid, res.isClockedIn);
 
-        // ✅ Use guid (non-null), not res.employeeId (nullable)
         await _loadStatus(guid);
         return;
       }
 
-      // OFFLINE verify
+      // 2) OFFLINE verify via roster cache
       final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
+
       if (cached == null) {
         setState(() => _message = "Employee not found (offline).");
         return;
       }
 
+      // Use our local status cache so offline doesn't get reversed.
       final cachedClockedIn =
           _statusCache.getIsClockedIn(cached.employeeId) ?? false;
 
@@ -283,9 +310,11 @@ class _TabletScreenState extends State<TabletScreen> {
     try {
       final StatusResponse s = await _api.status(guid);
       if (!mounted) return;
+
       setState(() => _clockedIn = s.isClockedIn);
       await _statusCache.setIsClockedIn(guid, s.isClockedIn);
     } catch (_) {
+      // fallback to cache (prevents reversed UI)
       final cached = _statusCache.getIsClockedIn(guid);
       if (cached != null && mounted) {
         setState(() => _clockedIn = cached);
@@ -305,8 +334,8 @@ class _TabletScreenState extends State<TabletScreen> {
     });
 
     // 0 = ClockIn, 1 = ClockOut
-    final punchType = _clockedIn ? 1 : 0;
-    final seq = _seqStore.next();
+    final int punchType = _clockedIn ? 1 : 0;
+    final int seq = _seqStore.next();
     final nowUtc = DateTime.now().toUtc();
 
     final queuedPayload = <String, dynamic>{
@@ -318,8 +347,14 @@ class _TabletScreenState extends State<TabletScreen> {
       "longitude": null,
     };
 
-    // optimistic toggle
-    final newClockedIn = (punchType == 0);
+    // ✅ IMPORTANT: Always behave the same online/offline for status:
+    // - Toggle the UI immediately
+    // - Update local cache immediately
+    //
+    // Hook point: if your real backend has rules like "cannot clock out without clocking in",
+    // you can have the backend return a rejection reason and then we revert the toggle.
+    final bool newClockedIn = (punchType == 0);
+
     setState(() {
       _clockedIn = newClockedIn;
       _message = (punchType == 0) ? "Clock In recorded." : "Clock Out recorded.";
@@ -330,6 +365,7 @@ class _TabletScreenState extends State<TabletScreen> {
       final online = await _isOnline();
 
       if (online) {
+        // Online: send to backend immediately
         await _api.punch(PunchRequest(
           employeeId: _employeeGuid!,
           punchType: punchType,
@@ -339,21 +375,27 @@ class _TabletScreenState extends State<TabletScreen> {
           timestampUtc: nowUtc,
         ));
 
-        await Future.delayed(const Duration(milliseconds: 150));
-        await _loadStatus(_employeeGuid!);
-
+        // DO NOT immediately call _loadStatus() here.
+        // That was the cause of "John never flips" because the UI gets overwritten.
+        //
+        // Hook point: once you connect to your real backend, the best pattern is:
+        // - backend returns new status (isClockedIn) in the punch response
+        // - then set UI/cache to that returned value (no extra /status call)
+        //
+        // For now, we trust the local toggle and rely on Verify/Sync to reconcile.
         Future.delayed(const Duration(seconds: 2), _resetSession);
       } else {
+        // Offline: queue it
         await _queue.enqueue(queuedPayload);
         await _refreshPending();
 
         if (!mounted) return;
-        setState(() =>
-            _message = "Offline: Punch queued ($_pendingCount pending).");
+        setState(() => _message = "Offline: Punch queued ($_pendingCount pending).");
 
         Future.delayed(const Duration(seconds: 2), _resetSession);
       }
-    } catch (_) {
+    } catch (e) {
+      // If online punch fails, queue it (same behavior as offline mode)
       await _queue.enqueue(queuedPayload);
       await _refreshPending();
 
@@ -367,6 +409,9 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
+  // ----------------------------
+  // UI (UNCHANGED DESIGN)
+  // ----------------------------
   @override
   Widget build(BuildContext context) {
     final timeStr = _formatTime(_now);
@@ -430,8 +475,7 @@ class _TabletScreenState extends State<TabletScreen> {
                   ),
                   const SizedBox(width: 8),
                   TextButton(
-                    onPressed: () =>
-                        setState(() => _forceOffline = !_forceOffline),
+                    onPressed: () => setState(() => _forceOffline = !_forceOffline),
                     child: Text(
                       _forceOffline ? "OFFLINE: ON" : "OFFLINE: OFF",
                       style: TextStyle(
@@ -452,7 +496,6 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
-  // UI helpers below unchanged
   Widget _buildLeftPanel(bool canVerify) {
     return Container(
       padding: const EdgeInsets.all(18),
@@ -703,12 +746,7 @@ class _TabletScreenState extends State<TabletScreen> {
   Widget _keypadRow(List<String> labels) {
     return Row(
       children: labels
-          .map((l) => Expanded(
-                child: _keyButton(
-                  label: l,
-                  onTap: () => _appendDigit(l),
-                ),
-              ))
+          .map((l) => Expanded(child: _keyButton(label: l, onTap: () => _appendDigit(l))))
           .toList(),
     );
   }
