@@ -13,7 +13,7 @@ Future<void> main() async {
   await Hive.openBox('device');
   await Hive.openBox('punch_queue');
   await Hive.openBox('roster_cache');
-  await Hive.openBox('status_cache'); // ✅ NEW
+  await Hive.openBox('status_cache');
 
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
@@ -32,15 +32,12 @@ class TimeClockApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: Colors.black,
         useMaterial3: true,
       ),
-
       initialRoute: Routes.tablet,
-
       onGenerateRoute: (settings) {
         switch (settings.name) {
           case Routes.tablet:

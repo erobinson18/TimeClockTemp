@@ -16,6 +16,8 @@ import '../../data/models/sync.dart';
 import '../../data/models/verify.dart';
 import '../../data/remote/timeclock_api.dart';
 
+import '../../widgets/logo_header.dart';
+
 class TabletScreen extends StatefulWidget {
   const TabletScreen({super.key});
 
@@ -45,12 +47,6 @@ class _TabletScreenState extends State<TabletScreen> {
   String? _message;
   int _pendingCount = 0;
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // 🔌 INTEGRATION HOOKS (when you swap to the real backend):
-  // - deviceType / deviceId should come from your real kiosk registration config
-  // - API baseUrl already centralized in AppConfig (config.dart)
-  // - Verify/Status/Punch/Sync endpoints are called through TimeClockApi
-  // ─────────────────────────────────────────────────────────────────────────────
   static const int deviceType = 1;
   static const String deviceId = "KIOSK-TEST-01";
 
@@ -60,7 +56,6 @@ class _TabletScreenState extends State<TabletScreen> {
   Timer? _syncTimer;
   DateTime _now = DateTime.now();
 
-  // Optional: last sync timestamp for the top-left label (matches old screen vibe)
   DateTime? _lastSyncAttemptLocal;
 
   @override
@@ -152,12 +147,6 @@ class _TabletScreenState extends State<TabletScreen> {
   Future<void> _warmupRoster() async {
     try {
       if (!await _isOnline()) return;
-
-      // ─────────────────────────────────────────────────────────────────────────
-      // 🔌 INTEGRATION HOOK:
-      // Replace rosterAll() logic if your existing backend has a different roster
-      // endpoint or requires auth tokens / headers.
-      // ─────────────────────────────────────────────────────────────────────────
       final items = await _api.rosterAll();
       final json = items.map((e) => e.toJson()).toList();
       await _rosterCache.saveAll(json);
@@ -213,10 +202,6 @@ class _TabletScreenState extends State<TabletScreen> {
         punches: punches,
       );
 
-      // ─────────────────────────────────────────────────────────────────────────
-      // 🔌 INTEGRATION HOOK:
-      // If your existing backend sync API differs, change TimeClockApi.syncBatch().
-      // ─────────────────────────────────────────────────────────────────────────
       final result = await _api.syncBatch(batch);
 
       await _queue.removeByLocalSeq(result.acceptedSeq.toSet());
@@ -248,10 +233,6 @@ class _TabletScreenState extends State<TabletScreen> {
       if (await _isOnline()) {
         await _warmupRoster();
 
-        // ───────────────────────────────────────────────────────────────────────
-        // 🔌 INTEGRATION HOOK:
-        // If your real backend verify returns different fields, adjust VerifyResponse.
-        // ───────────────────────────────────────────────────────────────────────
         final res = await _api.verify(_employeeNumber);
 
         if (!res.isValid) {
@@ -267,10 +248,8 @@ class _TabletScreenState extends State<TabletScreen> {
 
         _applyVerified(res, message: "Verified.");
 
-        // cache truth immediately
         await _statusCache.setIsClockedIn(guid, res.isClockedIn);
 
-        // confirm via status endpoint (source of truth)
         await _loadStatus(guid);
         return;
       }
@@ -304,17 +283,11 @@ class _TabletScreenState extends State<TabletScreen> {
 
   Future<void> _loadStatus(String guid) async {
     try {
-      // ─────────────────────────────────────────────────────────────────────────
-      // 🔌 INTEGRATION HOOK:
-      // Your real backend may compute “clocked in” differently.
-      // This screen assumes StatusResponse.isClockedIn is the truth.
-      // ─────────────────────────────────────────────────────────────────────────
       final StatusResponse s = await _api.status(guid);
       if (!mounted) return;
       setState(() => _clockedIn = s.isClockedIn);
       await _statusCache.setIsClockedIn(guid, s.isClockedIn);
     } catch (_) {
-      // fallback cache
       final cached = _statusCache.getIsClockedIn(guid);
       if (cached != null && mounted) {
         setState(() => _clockedIn = cached);
@@ -359,11 +332,6 @@ class _TabletScreenState extends State<TabletScreen> {
       final online = await _isOnline();
 
       if (online) {
-        // ───────────────────────────────────────────────────────────────────────
-        // 🔌 INTEGRATION HOOK:
-        // If your real backend needs auth/device registration/signing,
-        // update ApiClient headers + the PunchRequest payload as needed.
-        // ───────────────────────────────────────────────────────────────────────
         await _api.punch(PunchRequest(
           employeeId: _employeeGuid!,
           punchType: punchType,
@@ -373,7 +341,6 @@ class _TabletScreenState extends State<TabletScreen> {
           timestampUtc: nowUtc,
         ));
 
-        // Shorter confirmation delay (keeps UX snappy)
         await Future.delayed(const Duration(milliseconds: 75));
         await _loadStatus(_employeeGuid!);
 
@@ -384,7 +351,7 @@ class _TabletScreenState extends State<TabletScreen> {
 
         if (!mounted) return;
         setState(() =>
-        _message = "Offline: Punch queued ($_pendingCount pending).");
+            _message = "Offline: Punch queued ($_pendingCount pending).");
 
         Future.delayed(const Duration(seconds: 2), _resetSession);
       }
@@ -404,12 +371,10 @@ class _TabletScreenState extends State<TabletScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Global “scale down a bit” so everything fits nicer on real tablets.
-    // Base width ~1600 keeps your current look but slightly smaller on common tablets.
+    // Global scale down so it fits more tablets nicely.
     return LayoutBuilder(
       builder: (context, constraints) {
         final scale = (constraints.maxWidth / 1600.0).clamp(0.78, 1.0);
-
         double s(double v) => v * scale;
 
         final timeStr = _formatTime(_now);
@@ -430,16 +395,13 @@ class _TabletScreenState extends State<TabletScreen> {
                   padding: EdgeInsets.all(s(24)),
                   child: Row(
                     children: [
-                      // Left panel: avoid hard fixed width so it fits more screens
+                      // Left panel
                       ConstrainedBox(
                         constraints: BoxConstraints(
                           minWidth: s(320),
                           maxWidth: s(400),
                         ),
-                        child: _buildLeftPanel(
-                          canVerify,
-                          s,
-                        ),
+                        child: _buildLeftPanel(canVerify, s),
                       ),
                       SizedBox(width: s(24)),
                       Expanded(
@@ -456,7 +418,7 @@ class _TabletScreenState extends State<TabletScreen> {
                   ),
                 ),
 
-                // Top-left: pending + last sync attempt (like your old screen)
+                // Top-left: pending + last sync attempt
                 Positioned(
                   left: s(24),
                   top: s(10),
@@ -509,7 +471,7 @@ class _TabletScreenState extends State<TabletScreen> {
                   ),
                 ),
 
-                // Bottom-right version (keep your vibe)
+                // Bottom-right version
                 Positioned(
                   right: s(24),
                   bottom: s(8),
@@ -547,7 +509,9 @@ class _TabletScreenState extends State<TabletScreen> {
               color: Colors.white.withOpacity(0.12),
               borderRadius: BorderRadius.circular(s(16)),
               border: Border.all(
-                  color: Colors.white.withOpacity(0.18), width: s(2)),
+                color: Colors.white.withOpacity(0.18),
+                width: s(2),
+              ),
             ),
             child: Row(
               children: [
@@ -569,7 +533,7 @@ class _TabletScreenState extends State<TabletScreen> {
                     color: Colors.white.withOpacity(0.85),
                     size: s(22),
                   ),
-                )
+                ),
               ],
             ),
           ),
@@ -587,22 +551,24 @@ class _TabletScreenState extends State<TabletScreen> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(s(16)),
                   side: BorderSide(
-                      color: Colors.white.withOpacity(0.18), width: s(2)),
+                    color: Colors.white.withOpacity(0.18),
+                    width: s(2),
+                  ),
                 ),
               ),
               child: _verifying
                   ? SizedBox(
-                width: s(20),
-                height: s(20),
-                child: const CircularProgressIndicator(strokeWidth: 2),
-              )
+                      width: s(20),
+                      height: s(20),
+                      child: const CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : Text(
-                "VERIFY",
-                style: TextStyle(
-                  fontSize: s(18),
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
+                      "VERIFY",
+                      style: TextStyle(
+                        fontSize: s(18),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
             ),
           ),
         ],
@@ -618,8 +584,6 @@ class _TabletScreenState extends State<TabletScreen> {
     required Color actionColor,
     required bool canPunch,
   }) {
-    // CLOCK BUTTON ~20% smaller than before:
-    // old: 200x200 -> new: 160x160
     final clockBtnSize = s(160);
 
     return Container(
@@ -644,7 +608,7 @@ class _TabletScreenState extends State<TabletScreen> {
           ),
           SizedBox(height: s(10)),
 
-          // Make time fit better using FittedBox + scaled size
+          // TIME
           FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
@@ -674,60 +638,65 @@ class _TabletScreenState extends State<TabletScreen> {
 
           SizedBox(height: s(18)),
 
-          // Center area: show name/status when verified; otherwise show company logo
-          if (_verified && _fullName != null) ...[
-            Text(
-              _fullName!.toUpperCase(),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: s(28),
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            SizedBox(height: s(8)),
-            Text(
-              _clockedIn ? "You are currently IN" : "You are currently OUT",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.85),
-                fontSize: s(16),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ] else ...[
-            // ─────────────────────────────────────────────────────────────────────
-            // 🖼️ LOGO SLOT (matches your old screen behavior)
-            // Put your logo at: assets/company_logo.png
-            // Add it in pubspec.yaml assets section.
-            // ─────────────────────────────────────────────────────────────────────
-            Expanded(
-              child: Center(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: s(24)),
-                  child: Image.asset(
-                    "assets/company_logo.png",
-                    fit: BoxFit.contain,
-                    // keeps it from being huge; scales with screen
-                    height: s(170),
-                    errorBuilder: (_, __, ___) => Text(
-                      "Add your logo:\nassets/company_logo.png",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.85),
-                        fontSize: s(18),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
+          // ✅ LOGO ALWAYS VISIBLE
+          Expanded(
+            child: Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: s(24)),
+                child: LogoHeader(
+                  heightFactor: 0.22,
+                  padding: EdgeInsets.zero,
+                  maxHeight: s(220),
+                  minHeight: s(90),
                 ),
               ),
             ),
+          ),
+
+          // ✅ Employee info ABOVE the clock button (logo never swaps out)
+          if (_verified && _fullName != null) ...[
+            SizedBox(height: s(10)),
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: s(16), vertical: s(10)),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(s(16)),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.14),
+                  width: s(2),
+                ),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    _fullName!.toUpperCase(),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: s(22),
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  SizedBox(height: s(6)),
+                  Text(
+                    _clockedIn ? "You are currently IN" : "You are currently OUT",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.85),
+                      fontSize: s(14),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            SizedBox(height: s(8)),
           ],
 
-          const Spacer(),
+          SizedBox(height: s(12)),
 
-          // Clock button stays centered and a bit smaller
+          // Clock button
           Center(
             child: GestureDetector(
               onTap: canPunch ? _doPunch : null,
@@ -745,32 +714,32 @@ class _TabletScreenState extends State<TabletScreen> {
                         color: actionColor.withOpacity(0.30),
                         blurRadius: s(18),
                         spreadRadius: s(3),
-                      )
+                      ),
                     ],
                   ),
                   alignment: Alignment.center,
                   child: _punching
                       ? SizedBox(
-                    width: s(28),
-                    height: s(28),
-                    child: const CircularProgressIndicator(strokeWidth: 3),
-                  )
+                          width: s(28),
+                          height: s(28),
+                          child: const CircularProgressIndicator(strokeWidth: 3),
+                        )
                       : Text(
-                    actionText,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.black,
-                      fontSize: s(22),
-                      fontWeight: FontWeight.w900,
-                      height: 1.0,
-                    ),
-                  ),
+                          actionText,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.black,
+                            fontSize: s(22),
+                            fontWeight: FontWeight.w900,
+                            height: 1.0,
+                          ),
+                        ),
                 ),
               ),
             ),
           ),
 
-          SizedBox(height: s(14)),
+          SizedBox(height: s(12)),
 
           if (_message != null)
             Text(
@@ -783,7 +752,7 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
             ),
 
-          SizedBox(height: s(8)),
+          SizedBox(height: s(6)),
         ],
       ),
     );
@@ -832,12 +801,12 @@ class _TabletScreenState extends State<TabletScreen> {
     return Row(
       children: labels
           .map((l) => Expanded(
-        child: _keyButton(
-          label: l,
-          onTap: () => _appendDigit(l),
-          s: s,
-        ),
-      ))
+                child: _keyButton(
+                  label: l,
+                  onTap: () => _appendDigit(l),
+                  s: s,
+                ),
+              ))
           .toList(),
     );
   }
@@ -858,7 +827,10 @@ class _TabletScreenState extends State<TabletScreen> {
           height: s(78),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(s(18)),
-            border: Border.all(color: Colors.white.withOpacity(0.20), width: s(2)),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.20),
+              width: s(2),
+            ),
             color: filled ? Colors.white.withOpacity(0.12) : Colors.transparent,
           ),
           alignment: Alignment.center,
@@ -915,7 +887,6 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   String _formatSyncStamp(DateTime dt) {
-    // Ex: 02/19/2026 1:26:34 PM CST (local time zone name varies on device)
     final mm = dt.month.toString().padLeft(2, "0");
     final dd = dt.day.toString().padLeft(2, "0");
     final yyyy = dt.year.toString();
