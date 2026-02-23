@@ -12,7 +12,7 @@ class ConnectivityService {
     if (result == ConnectivityResult.none) return false;
 
     try {
-      await _api.ping(); // cheap GET
+      //await _api.ping(); // cheap GET
       return true;
     } catch (_) {
       return false;

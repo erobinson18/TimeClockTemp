@@ -33,12 +33,10 @@ class _TabletScreenState extends State<TabletScreen> {
   final _connectivity = Connectivity();
   final _seqStore = LocalSeqStore();
 
-  // Kiosk entry
   String _employeeNumber = "";
   bool _verifying = false;
   bool _punching = false;
 
-  // Verified employee session
   bool _verified = false;
   String? _employeeGuid;
   String? _fullName;
@@ -49,8 +47,6 @@ class _TabletScreenState extends State<TabletScreen> {
 
   static const int deviceType = 1;
   static const String deviceId = "KIOSK-TEST-01";
-
-  bool _forceOffline = false;
 
   Timer? _clockTimer;
   Timer? _syncTimer;
@@ -122,8 +118,6 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   Future<bool> _isOnline() async {
-    if (_forceOffline) return false;
-
     if (kIsWeb) {
       try {
         await _api.ping();
@@ -214,7 +208,7 @@ class _TabletScreenState extends State<TabletScreen> {
         await _loadStatus(_employeeGuid!);
       }
     } catch (_) {
-      // kiosk: keep quiet
+      // keep quiet
     }
   }
 
@@ -242,7 +236,7 @@ class _TabletScreenState extends State<TabletScreen> {
 
         final guid = res.employeeId;
         if (guid == null || guid.trim().isEmpty) {
-          setState(() => _message = "Verify failed: missing employee GUID.");
+          setState(() => _message = "Verify failed: missing employee ID.");
           return;
         }
 
@@ -254,7 +248,6 @@ class _TabletScreenState extends State<TabletScreen> {
         return;
       }
 
-      // OFFLINE verify
       final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
       if (cached == null) {
         setState(() => _message = "Employee not found (offline).");
@@ -306,7 +299,6 @@ class _TabletScreenState extends State<TabletScreen> {
       _message = null;
     });
 
-    // 0 = ClockIn, 1 = ClockOut
     final punchType = _clockedIn ? 1 : 0;
     final seq = _seqStore.next();
     final nowUtc = DateTime.now().toUtc();
@@ -320,7 +312,6 @@ class _TabletScreenState extends State<TabletScreen> {
       "longitude": null,
     };
 
-    // optimistic toggle
     final newClockedIn = (punchType == 0);
     setState(() {
       _clockedIn = newClockedIn;
@@ -371,7 +362,6 @@ class _TabletScreenState extends State<TabletScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Global scale down so it fits more tablets nicely.
     return LayoutBuilder(
       builder: (context, constraints) {
         final scale = (constraints.maxWidth / 1600.0).clamp(0.78, 1.0);
@@ -395,7 +385,6 @@ class _TabletScreenState extends State<TabletScreen> {
                   padding: EdgeInsets.all(s(24)),
                   child: Row(
                     children: [
-                      // Left panel
                       ConstrainedBox(
                         constraints: BoxConstraints(
                           minWidth: s(320),
@@ -418,7 +407,6 @@ class _TabletScreenState extends State<TabletScreen> {
                   ),
                 ),
 
-                // Top-left: pending + last sync attempt
                 Positioned(
                   left: s(24),
                   top: s(10),
@@ -434,7 +422,6 @@ class _TabletScreenState extends State<TabletScreen> {
                   ),
                 ),
 
-                // Top-right: Sync + Offline toggle
                 Positioned(
                   right: s(24),
                   top: s(10),
@@ -452,31 +439,15 @@ class _TabletScreenState extends State<TabletScreen> {
                           ),
                         ),
                       ),
-                      SizedBox(width: s(8)),
-                      TextButton(
-                        onPressed: () =>
-                            setState(() => _forceOffline = !_forceOffline),
-                        child: Text(
-                          _forceOffline ? "OFFLINE: ON" : "OFFLINE: OFF",
-                          style: TextStyle(
-                            color: _forceOffline
-                                ? Colors.orange.withOpacity(0.9)
-                                : Colors.white.withOpacity(0.75),
-                            fontSize: s(12),
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
                     ],
                   ),
                 ),
 
-                // Bottom-right version
                 Positioned(
                   right: s(24),
                   bottom: s(8),
                   child: Text(
-                    "ver 4.0.0",
+                    "ver 4.0.1",
                     style: TextStyle(
                       color: Colors.white.withOpacity(0.55),
                       fontSize: s(12),
@@ -608,7 +579,6 @@ class _TabletScreenState extends State<TabletScreen> {
           ),
           SizedBox(height: s(10)),
 
-          // TIME
           FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
@@ -638,7 +608,6 @@ class _TabletScreenState extends State<TabletScreen> {
 
           SizedBox(height: s(18)),
 
-          // ✅ LOGO ALWAYS VISIBLE
           Expanded(
             child: Center(
               child: Padding(
@@ -653,7 +622,6 @@ class _TabletScreenState extends State<TabletScreen> {
             ),
           ),
 
-          // ✅ Employee info ABOVE the clock button (logo never swaps out)
           if (_verified && _fullName != null) ...[
             SizedBox(height: s(10)),
             Container(
@@ -696,7 +664,6 @@ class _TabletScreenState extends State<TabletScreen> {
 
           SizedBox(height: s(12)),
 
-          // Clock button
           Center(
             child: GestureDetector(
               onTap: canPunch ? _doPunch : null,
