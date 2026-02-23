@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 import '../../core/api_client.dart';
+import '../../core/Services/device_config_service.dart';
+
 import '../../data/local/punch_queue.dart';
 import '../../data/local/roster_cache.dart';
 import '../../data/local/status_cache.dart';
@@ -33,10 +35,12 @@ class _TabletScreenState extends State<TabletScreen> {
   final _connectivity = Connectivity();
   final _seqStore = LocalSeqStore();
 
+  // Entry
   String _employeeNumber = "";
   bool _verifying = false;
   bool _punching = false;
 
+  // Session
   bool _verified = false;
   String? _employeeGuid;
   String? _fullName;
@@ -45,14 +49,18 @@ class _TabletScreenState extends State<TabletScreen> {
   String? _message;
   int _pendingCount = 0;
 
+  // These are your app-level identifiers (not Vista). Vista mapping can happen server-side.
   static const int deviceType = 1;
   static const String deviceId = "KIOSK-TEST-01";
 
   Timer? _clockTimer;
   Timer? _syncTimer;
   DateTime _now = DateTime.now();
-
   DateTime? _lastSyncAttemptLocal;
+
+  // Admin codes (future-proof)
+  static const String _adminServiceCode = "000000";
+  static const String _adminPunchLogCode = "999999";
 
   @override
   void initState() {
@@ -61,7 +69,6 @@ class _TabletScreenState extends State<TabletScreen> {
 
     _refreshPending();
     _startClock();
-
     _warmupRoster();
 
     _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) => _trySync());
@@ -118,15 +125,6 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   Future<bool> _isOnline() async {
-    if (kIsWeb) {
-      try {
-        await _api.ping();
-        return true;
-      } catch (_) {
-        return false;
-      }
-    }
-
     final results = await _connectivity.checkConnectivity();
     if (results.contains(ConnectivityResult.none)) return false;
 
@@ -144,9 +142,7 @@ class _TabletScreenState extends State<TabletScreen> {
       final items = await _api.rosterAll();
       final json = items.map((e) => e.toJson()).toList();
       await _rosterCache.saveAll(json);
-    } catch (_) {
-      // ignore
-    }
+    } catch (_) {}
   }
 
   void _applyVerified(VerifyResponse res, {required String message}) {
@@ -207,14 +203,24 @@ class _TabletScreenState extends State<TabletScreen> {
       if (_employeeGuid != null) {
         await _loadStatus(_employeeGuid!);
       }
-    } catch (_) {
-      // keep quiet
-    }
+    } catch (_) {}
   }
 
   Future<void> _verifyEmployee() async {
     if (_employeeNumber.isEmpty) {
       setState(() => _message = "Enter your Employee ID.");
+      return;
+    }
+
+    if (_employeeNumber == _adminServiceCode) {
+      await _showServiceSettingsDialog();
+      _clearEntry();
+      return;
+    }
+
+    if (_employeeNumber == _adminPunchLogCode) {
+      await _showPunchLogDialog();
+      _clearEntry();
       return;
     }
 
@@ -226,7 +232,6 @@ class _TabletScreenState extends State<TabletScreen> {
     try {
       if (await _isOnline()) {
         await _warmupRoster();
-
         final res = await _api.verify(_employeeNumber);
 
         if (!res.isValid) {
@@ -241,13 +246,12 @@ class _TabletScreenState extends State<TabletScreen> {
         }
 
         _applyVerified(res, message: "Verified.");
-
         await _statusCache.setIsClockedIn(guid, res.isClockedIn);
-
         await _loadStatus(guid);
         return;
       }
 
+      // Offline verify from cache
       final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
       if (cached == null) {
         setState(() => _message = "Employee not found (offline).");
@@ -341,8 +345,7 @@ class _TabletScreenState extends State<TabletScreen> {
         await _refreshPending();
 
         if (!mounted) return;
-        setState(() =>
-            _message = "Offline: Punch queued ($_pendingCount pending).");
+        setState(() => _message = "Offline: Punch queued ($_pendingCount pending).");
 
         Future.delayed(const Duration(seconds: 2), _resetSession);
       }
@@ -358,6 +361,129 @@ class _TabletScreenState extends State<TabletScreen> {
       if (!mounted) return;
       setState(() => _punching = false);
     }
+  }
+
+  Future<void> _showServiceSettingsDialog() async {
+    final urlCtrl = TextEditingController(text: DeviceConfigService.baseUrl);
+    final kioskCtrl = TextEditingController(text: DeviceConfigService.kioskId);
+    final authCtrl = TextEditingController(text: DeviceConfigService.authToken);
+
+    await showDialog<void>(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text("Admin: Service Settings"),
+          content: SizedBox(
+            width: 520,
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  TextField(
+                    controller: urlCtrl,
+                    decoration: const InputDecoration(
+                      labelText: "Service Base URL",
+                      hintText: "https://tcws.tsg.bz/tsgtc.asmx",
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: kioskCtrl,
+                    decoration: const InputDecoration(
+                      labelText: "Kiosk ID (MACAddress value)",
+                      hintText: "tsg-eld-android",
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: authCtrl,
+                    decoration: const InputDecoration(labelText: "Auth Token"),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    "Format: tsg-<locationcode>-<platform> (ex: tsg-eld-android)",
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
+            ),
+            TextButton(
+              onPressed: () async {
+                await DeviceConfigService.setBaseUrl(urlCtrl.text);
+                await DeviceConfigService.setKioskId(kioskCtrl.text);
+                await DeviceConfigService.setAuthToken(authCtrl.text);
+
+                if (mounted) setState(() => _message = "Service settings saved.");
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showPunchLogDialog() async {
+    final box = Hive.box('punch_queue');
+    final keys = box.keys.toList();
+    final items = <Map<String, dynamic>>[];
+
+    for (final k in keys.reversed.take(25)) {
+      final v = box.get(k);
+      if (v is Map) {
+        items.add(v.map((key, value) => MapEntry(key.toString(), value)));
+      }
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text("Admin: Punch Log"),
+          content: SizedBox(
+            width: 620,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text("Pending punches: $_pendingCount"),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: items.map((m) {
+                        final emp = (m["employeeId"] ?? "").toString();
+                        final type = (m["punchType"] ?? "").toString();
+                        final ts = (m["timestampUtc"] ?? "").toString();
+                        final seq = (m["localSequenceNumber"] ?? "").toString();
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Text(
+                            "Emp: $emp | Type: $type | Seq: $seq | UTC: $ts",
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Close"),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -406,7 +532,6 @@ class _TabletScreenState extends State<TabletScreen> {
                     ],
                   ),
                 ),
-
                 Positioned(
                   left: s(24),
                   top: s(10),
@@ -421,28 +546,21 @@ class _TabletScreenState extends State<TabletScreen> {
                     ),
                   ),
                 ),
-
                 Positioned(
                   right: s(24),
                   top: s(10),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextButton(
-                        onPressed: _trySync,
-                        child: Text(
-                          "Sync Now",
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.75),
-                            fontSize: s(12),
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
+                  child: TextButton(
+                    onPressed: _trySync,
+                    child: Text(
+                      "Sync Now",
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.75),
+                        fontSize: s(12),
+                        fontWeight: FontWeight.w700,
                       ),
-                    ],
+                    ),
                   ),
                 ),
-
                 Positioned(
                   right: s(24),
                   bottom: s(8),
@@ -578,7 +696,6 @@ class _TabletScreenState extends State<TabletScreen> {
             ),
           ),
           SizedBox(height: s(10)),
-
           FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
@@ -605,9 +722,7 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
             ),
           ),
-
           SizedBox(height: s(18)),
-
           Expanded(
             child: Center(
               child: Padding(
@@ -621,7 +736,6 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
             ),
           ),
-
           if (_verified && _fullName != null) ...[
             SizedBox(height: s(10)),
             Container(
@@ -661,9 +775,7 @@ class _TabletScreenState extends State<TabletScreen> {
           ] else ...[
             SizedBox(height: s(8)),
           ],
-
           SizedBox(height: s(12)),
-
           Center(
             child: GestureDetector(
               onTap: canPunch ? _doPunch : null,
@@ -705,9 +817,7 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
             ),
           ),
-
           SizedBox(height: s(12)),
-
           if (_message != null)
             Text(
               _message!,
@@ -718,7 +828,6 @@ class _TabletScreenState extends State<TabletScreen> {
                 fontWeight: FontWeight.w600,
               ),
             ),
-
           SizedBox(height: s(6)),
         ],
       ),
@@ -826,27 +935,11 @@ class _TabletScreenState extends State<TabletScreen> {
 
   String _formatDate(DateTime dt) {
     const months = [
-      "January",
-      "February",
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December"
+      "January","February","March","April","May","June",
+      "July","August","September","October","November","December"
     ];
     const days = [
-      "Monday",
-      "Tuesday",
-      "Wednesday",
-      "Thursday",
-      "Friday",
-      "Saturday",
-      "Sunday"
+      "Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"
     ];
     final dayName = days[dt.weekday - 1];
     final monthName = months[dt.month - 1];
