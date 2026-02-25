@@ -1,40 +1,41 @@
-import 'dart:async';
+import 'dart:convert';
 import 'package:http/http.dart' as http;
-
-import 'app_config.dart';
 
 class ApiClient {
   ApiClient({http.Client? client}) : _client = client ?? http.Client();
 
   final http.Client _client;
 
-  /// For ASMX, we call endpoints like:
-  ///   {baseUrl}/GetEmps?Auth=...
-  Future<String> getText(
-    String path, {
-    Map<String, String>? query,
+  Future<String> postSoap({
+    required Uri url,
+    required String soapAction,
+    required String envelopeXml,
+    Duration timeout = const Duration(seconds: 20),
   }) async {
-    final base = AppConfig.effectiveBaseUrl;
-    final uri = Uri.parse("$base/$path").replace(queryParameters: query);
-
     final res = await _client
-        .get(uri, headers: const {"Accept": "text/plain, text/xml, */*"})
-        .timeout(AppConfig.timeout);
+        .post(
+          url,
+          headers: {
+            "Content-Type": "text/xml; charset=utf-8",
+            "SOAPAction": soapAction,
+          },
+          body: utf8.encode(envelopeXml),
+        )
+        .timeout(timeout);
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw HttpException("GET $path failed: ${res.statusCode} ${res.body}");
+      throw Exception("HTTP ${res.statusCode}: ${res.body}");
     }
 
     return res.body;
   }
 
+  Future<void> ping(Uri url, {Duration timeout = const Duration(seconds: 6)}) async {
+    final res = await _client.get(url).timeout(timeout);
+    if (res.statusCode < 200 || res.statusCode >= 500) {
+      throw Exception("Ping failed: HTTP ${res.statusCode}");
+    }
+  }
+
   void dispose() => _client.close();
-}
-
-class HttpException implements Exception {
-  final String message;
-  HttpException(this.message);
-
-  @override
-  String toString() => message;
 }

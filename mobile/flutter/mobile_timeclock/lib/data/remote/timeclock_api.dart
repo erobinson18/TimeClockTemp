@@ -1,190 +1,170 @@
-import '../../core/api_client.dart';
-import '../../core/app_config.dart';
+import 'package:xml/xml.dart';
 
-import '../models/punch.dart';
-import '../models/status.dart';
+import '../../core/api_client.dart';
+import '../../core/Services/device_config_service.dart';
+
 import '../models/sync.dart';
 import '../models/verify.dart';
+import '../models/status.dart';
+import '../models/punch.dart';
 
 class TimeClockApi {
   TimeClockApi(this._client);
 
   final ApiClient _client;
 
+  static const String _ns = "http://tsg.bz/";
+  static const String _asmxPath = "/tsgtc.asmx";
+
+  // ===== Connectivity =====
   Future<void> ping() async {
-    await getEmps();
+    final endpoint = _endpointUri();
+    await _client.ping(endpoint);
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // ASMX: GetEmps(Auth) -> string
-  // ────────────────────────────────────────────────────────────────────────────
-  Future<String> getEmps() async {
-    final raw = await _client.getText("GetEmps", query: {
-      "Auth": AppConfig.authToken,
-    });
-
-    return _extractAsmxString(raw);
-  }
-
-  /// Returns roster items for caching (TabletScreen warmupRoster uses toJson()).
+  // ===== Step 1: Roster (GetEmps) =====
   Future<List<RosterItem>> rosterAll() async {
-    final raw = await getEmps();
-    final emps = _parseEmployees(raw);
+    final endpoint = _endpointUri();
+    final auth = DeviceConfigService.authToken.trim();
 
-    return emps
-        .map((e) => RosterItem(
-              employeeId: e.empId,
-              employeeNumber: e.empId,
-              fullName: e.fullName,
-            ))
-        .toList();
+    if (auth.isEmpty) {
+      throw Exception("Missing Auth Token (admin settings).");
+    }
+
+    final envelope = _soapEnvelope("""
+<GetEmps xmlns="$_ns">
+  <Auth>${_xmlEscape(auth)}</Auth>
+</GetEmps>
+""");
+
+    final xmlText = await _client.postSoap(
+      url: endpoint,
+      soapAction: "${_ns}GetEmps",
+      envelopeXml: envelope,
+    );
+
+    final raw = _extractResult(xmlText, "GetEmpsResult");
+    return _parseGetEmpsPairs(raw);
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // "Verify" (front-end concept):
-  // We verify an EmpID exists by checking GetEmps result, then GetStatus for truth.
-  // ────────────────────────────────────────────────────────────────────────────
+  // Kept for compatibility (even if TabletScreen no longer calls it)
   Future<VerifyResponse> verify(String employeeNumber) async {
-    final emps = _parseEmployees(await getEmps());
-    final match = emps.where((e) => e.empId == employeeNumber).toList();
+    final roster = await rosterAll();
 
-    if (match.isEmpty) {
+    final hit = roster.firstWhere(
+      (e) => e.employeeNumber.trim() == employeeNumber.trim(),
+      orElse: () => const RosterItem(
+        employeeId: "",
+        employeeNumber: "",
+        fullName: "",
+      ),
+    );
+
+    if (hit.employeeId.isEmpty) {
+      // IMPORTANT: VerifyResponse requires all fields
       return const VerifyResponse(
         isValid: false,
-        employeeId: null,
-        employeeNumber: null,
-        fullName: null,
+        employeeId: "",
+        employeeNumber: "",
+        fullName: "",
         isClockedIn: false,
       );
     }
 
-    final s = await status(employeeNumber);
-
+    // Until Step 2 (GetStatus) is wired, default isClockedIn to false.
     return VerifyResponse(
       isValid: true,
-      employeeId: employeeNumber,
-      employeeNumber: employeeNumber,
-      fullName: match.first.fullName,
-      isClockedIn: s.isClockedIn,
+      employeeId: hit.employeeId,
+      employeeNumber: hit.employeeNumber,
+      fullName: hit.fullName,
+      isClockedIn: false,
     );
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // ASMX: GetStatus(EmpID, MACAddress, CurrTime, Auth, OTCode) -> string
-  // ────────────────────────────────────────────────────────────────────────────
-  Future<StatusResponse> status(String employeeGuidOrId) async {
-    final raw = await _client.getText("GetStatus", query: {
-      "EmpID": employeeGuidOrId,
-      "MACAddress": AppConfig.kioskId,
-      "CurrTime": TimeFormats.nowForBackend(),
-      "Auth": AppConfig.authToken,
-      "OTCode": AppConfig.otCode,
-    });
-
-    final result = _extractAsmxString(raw);
-    return StatusResponse.fromRaw(result);
+  // ===== Step 2 (later): Status =====
+  Future<StatusResponse> status(String employeeId) {
+    throw UnimplementedError("status() not wired yet (needs GetStatusResult format).");
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // ASMX: CollectPunches(EmpID, PunchTime, MACAddress, Auth, OTCode) -> string
-  // ────────────────────────────────────────────────────────────────────────────
-  Future<void> punch(PunchRequest req) async {
-    final raw = await _client.getText("CollectPunches", query: {
-      "EmpID": req.employeeId,
-      "PunchTime": TimeFormats.toBackendString(req.timestampUtc.toLocal()),
-      "MACAddress": AppConfig.kioskId,
-      "Auth": AppConfig.authToken,
-      "OTCode": AppConfig.otCode,
-    });
-
-    final result = _extractAsmxString(raw);
-    final ok = _isOkResult(result);
-
-    if (!ok) {
-      throw Exception("CollectPunches failed: $result");
-    }
+  // ===== Step 3 (later): Punch =====
+  Future<void> punch(PunchRequest req) {
+    throw UnimplementedError("punch() not wired yet (needs CollectPunchesResult format).");
   }
 
-  // If batching isn't supported, send each punch.
-  Future<SyncResult> syncBatch(SyncPunchBatch batch) async {
-    int processed = 0;
-    final accepted = <int>[];
+  // ===== Sync (later) =====
+  Future<SyncResult> syncBatch(SyncPunchBatch batch) {
+    throw UnimplementedError("syncBatch() not wired yet (needs backend behavior/format).");
+  }
 
-    for (final p in batch.punches) {
-      final raw = await _client.getText("CollectPunches", query: {
-        "EmpID": p.employeeId,
-        "PunchTime": TimeFormats.toBackendString(p.timestampUtc.toLocal()),
-        "MACAddress": AppConfig.kioskId,
-        "Auth": AppConfig.authToken,
-        "OTCode": AppConfig.otCode,
-      });
-
-      final result = _extractAsmxString(raw);
-      if (_isOkResult(result)) {
-        processed++;
-        accepted.add(p.localSequenceNumber);
-      }
+  // ===== Internal helpers =====
+  Uri _endpointUri() {
+    final raw = DeviceConfigService.baseUrl.trim();
+    if (raw.isEmpty) {
+      throw Exception("Missing Base URL (admin settings).");
     }
 
-    return SyncResult(processed: processed, acceptedSeq: accepted);
+    final uri = Uri.parse(raw);
+
+    final isAsmx = uri.path.toLowerCase().endsWith(".asmx");
+    if (isAsmx) return uri;
+
+    return uri.replace(path: _asmxPath);
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Helpers
-  // ────────────────────────────────────────────────────────────────────────────
-
-  bool _isOkResult(String s) {
-    final r = s.trim().toLowerCase();
-    return !(r.contains("error") || r.contains("fail") || r.contains("invalid"));
+  String _soapEnvelope(String bodyInnerXml) {
+    return """<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+               xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+$bodyInnerXml
+  </soap:Body>
+</soap:Envelope>""";
   }
 
-  String _extractAsmxString(String body) {
-    final b = body.trim();
-    if (!b.startsWith("<")) return b;
-
-    // extract inner contents of <string>...</string> or similar
-    final open = b.indexOf(">");
-    final close = b.lastIndexOf("</");
-    if (open != -1 && close != -1 && close > open) {
-      return b.substring(open + 1, close).trim();
-    }
-
-    return b;
+  String _extractResult(String xmlText, String tagName) {
+    final doc = XmlDocument.parse(xmlText);
+    final node = doc.findAllElements(tagName).firstOrNull;
+    if (node == null) return "";
+    return node.innerText.trim();
   }
 
-  List<_Emp> _parseEmployees(String raw) {
-    final trimmed = raw.trim();
-    if (trimmed.isEmpty) return [];
+  List<RosterItem> _parseGetEmpsPairs(String raw) {
+    // Format: EmpId;Full Name;EmpId;Full Name;...
+    if (raw.trim().isEmpty) return [];
 
-    // service may separate rows by newline | pipe | semicolon
-    final rows = trimmed
-        .split(RegExp(r'[\r\n\|;]+'))
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
+    final parts = raw.split(";").map((e) => e.trim()).toList();
+    final out = <RosterItem>[];
 
-    final out = <_Emp>[];
-
-    for (final row in rows) {
-      // expected "12345,John Doe"
-      final parts = row.split(",");
-      if (parts.length < 2) continue;
-
-      final id = parts[0].trim();
-      final name = parts.sublist(1).join(",").trim();
+    for (int i = 0; i + 1 < parts.length; i += 2) {
+      final id = parts[i].trim();
+      final name = parts[i + 1].trim();
 
       if (id.isEmpty || name.isEmpty) continue;
-      out.add(_Emp(empId: id, fullName: name));
+
+      // Employee ID is what user types (can be non-numeric)
+      out.add(RosterItem(
+        employeeId: id,
+        employeeNumber: id,
+        fullName: name,
+      ));
     }
 
     return out;
   }
+
+  String _xmlEscape(String value) {
+    return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&apos;");
+  }
 }
 
-class _Emp {
-  final String empId;
-  final String fullName;
-  const _Emp({required this.empId, required this.fullName});
+extension _FirstOrNullExt<E> on Iterable<E> {
+  E? get firstOrNull => isEmpty ? null : first;
 }
 
 class RosterItem {
@@ -203,25 +183,4 @@ class RosterItem {
         "employeeNumber": employeeNumber,
         "fullName": fullName,
       };
-}
-
-class TimeFormats {
-  static String toBackendString(DateTime local) {
-    final mm = local.month.toString().padLeft(2, "0");
-    final dd = local.day.toString().padLeft(2, "0");
-    final yyyy = local.year.toString();
-
-    int h = local.hour;
-    final ampm = h >= 12 ? "PM" : "AM";
-    h = h % 12;
-    if (h == 0) h = 12;
-
-    final hh = h.toString();
-    final min = local.minute.toString().padLeft(2, "0");
-    final sec = local.second.toString().padLeft(2, "0");
-
-    return "$mm/$dd/$yyyy $hh:$min:$sec $ampm";
-  }
-
-  static String nowForBackend() => toBackendString(DateTime.now());
 }

@@ -49,7 +49,7 @@ class _TabletScreenState extends State<TabletScreen> {
   String? _message;
   int _pendingCount = 0;
 
-  // These are your app-level identifiers (not Vista). Vista mapping can happen server-side.
+  // Device identifiers (Vista mapping can remain server-side)
   static const int deviceType = 1;
   static const String deviceId = "KIOSK-TEST-01";
 
@@ -58,7 +58,7 @@ class _TabletScreenState extends State<TabletScreen> {
   DateTime _now = DateTime.now();
   DateTime? _lastSyncAttemptLocal;
 
-  // Admin codes (future-proof)
+  // Admin codes
   static const String _adminServiceCode = "000000";
   static const String _adminPunchLogCode = "999999";
 
@@ -82,6 +82,7 @@ class _TabletScreenState extends State<TabletScreen> {
     super.dispose();
   }
 
+  // ===== Clock =====
   void _startClock() {
     _clockTimer?.cancel();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -89,6 +90,7 @@ class _TabletScreenState extends State<TabletScreen> {
     });
   }
 
+  // ===== Keypad =====
   void _appendDigit(String digit) {
     HapticFeedback.selectionClick();
     setState(() {
@@ -124,6 +126,7 @@ class _TabletScreenState extends State<TabletScreen> {
     });
   }
 
+  // ===== Connectivity =====
   Future<bool> _isOnline() async {
     final results = await _connectivity.checkConnectivity();
     if (results.contains(ConnectivityResult.none)) return false;
@@ -136,31 +139,27 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
+  // ===== Step 1: Warm roster cache from GetEmps =====
   Future<void> _warmupRoster() async {
     try {
       if (!await _isOnline()) return;
+
       final items = await _api.rosterAll();
+
+      // RosterCache expects {employeeId, employeeNumber, fullName}
       final json = items.map((e) => e.toJson()).toList();
       await _rosterCache.saveAll(json);
     } catch (_) {}
   }
 
-  void _applyVerified(VerifyResponse res, {required String message}) {
-    setState(() {
-      _verified = true;
-      _employeeGuid = res.employeeId;
-      _fullName = res.fullName;
-      _clockedIn = res.isClockedIn;
-      _message = message;
-    });
-  }
-
+  // ===== Queue UI =====
   Future<void> _refreshPending() async {
     final c = await _queue.count();
     if (!mounted) return;
     setState(() => _pendingCount = c);
   }
 
+  // ===== Sync (placeholder until Step 3 is wired) =====
   Future<void> _trySync() async {
     try {
       _lastSyncAttemptLocal = DateTime.now();
@@ -206,6 +205,17 @@ class _TabletScreenState extends State<TabletScreen> {
     } catch (_) {}
   }
 
+  // ===== Verify =====
+  void _applyVerified(VerifyResponse res, {required String message}) {
+    setState(() {
+      _verified = true;
+      _employeeGuid = res.employeeId;
+      _fullName = res.fullName;
+      _clockedIn = res.isClockedIn;
+      _message = message;
+    });
+  }
+
   Future<void> _verifyEmployee() async {
     if (_employeeNumber.isEmpty) {
       setState(() => _message = "Enter your Employee ID.");
@@ -231,27 +241,36 @@ class _TabletScreenState extends State<TabletScreen> {
 
     try {
       if (await _isOnline()) {
+        // Refresh roster from GetEmps and cache it
         await _warmupRoster();
-        final res = await _api.verify(_employeeNumber);
 
-        if (!res.isValid) {
+        // Verify by searching cached roster
+        final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
+        if (cached == null) {
           setState(() => _message = "Invalid Employee ID");
           return;
         }
 
-        final guid = res.employeeId;
-        if (guid == null || guid.trim().isEmpty) {
-          setState(() => _message = "Verify failed: missing employee ID.");
-          return;
-        }
+        final cachedClockedIn =
+            _statusCache.getIsClockedIn(cached.employeeId) ?? false;
+
+        final res = VerifyResponse(
+          isValid: true,
+          employeeId: cached.employeeId,
+          employeeNumber: cached.employeeNumber,
+          fullName: cached.fullName,
+          isClockedIn: cachedClockedIn,
+        );
 
         _applyVerified(res, message: "Verified.");
-        await _statusCache.setIsClockedIn(guid, res.isClockedIn);
-        await _loadStatus(guid);
+        await _statusCache.setIsClockedIn(cached.employeeId, cachedClockedIn);
+
+        // Step 2 will make this real; for now it falls back to cache.
+        await _loadStatus(cached.employeeId);
         return;
       }
 
-      // Offline verify from cache
+      // Offline verify
       final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
       if (cached == null) {
         setState(() => _message = "Employee not found (offline).");
@@ -278,6 +297,7 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
+  // ===== Status (Step 2 later) =====
   Future<void> _loadStatus(String guid) async {
     try {
       final StatusResponse s = await _api.status(guid);
@@ -292,6 +312,7 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
+  // ===== Punch (Step 3 later) =====
   Future<void> _doPunch() async {
     if (!_verified || _employeeGuid == null) {
       setState(() => _message = "Verify first.");
@@ -363,6 +384,7 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
+  // ===== Admin: Service settings =====
   Future<void> _showServiceSettingsDialog() async {
     final urlCtrl = TextEditingController(text: DeviceConfigService.baseUrl);
     final kioskCtrl = TextEditingController(text: DeviceConfigService.kioskId);
@@ -382,7 +404,7 @@ class _TabletScreenState extends State<TabletScreen> {
                     controller: urlCtrl,
                     decoration: const InputDecoration(
                       labelText: "Service Base URL",
-                      hintText: "https://tcws.tsg.bz/tsgtc.asmx",
+                      hintText: "https://tcws.tsg.bz OR https://tcws.tsg.bz/tsgtc.asmx",
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -429,6 +451,7 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
+  // ===== Admin: Punch log =====
   Future<void> _showPunchLogDialog() async {
     final box = Hive.box('punch_queue');
     final keys = box.keys.toList();
@@ -486,6 +509,7 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
+  // ===== UI =====
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
