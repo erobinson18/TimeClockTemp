@@ -7,7 +7,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mobile_timeclock/features/tablet/tablet_screen.dart';
+import 'package:mobile_timeclock/core/features/tablet/tablet_screen.dart';
 
 void main() {
   testWidgets('Kiosk screen loads', (tester) async {

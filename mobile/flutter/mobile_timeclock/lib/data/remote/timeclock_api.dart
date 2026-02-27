@@ -6,6 +6,7 @@ import '../models/employee_directory_item.dart';
 import '../models/punch.dart';
 import '../models/status.dart';
 import '../models/sync.dart';
+import '../models/verify.dart';
 
 class TimeClockApi {
   final ApiClient _client;
@@ -57,6 +58,46 @@ class TimeClockApi {
     }
 
     return out;
+  }
+
+  // =====================
+  // Verify (compat method)
+  // =====================
+  /// Some screens expect TimeClockApi.verify(employeeNumber).
+  /// Your server does not appear to have a Verify endpoint, so we verify by roster lookup.
+  Future<VerifyResponse> verify(String employeeNumber) async {
+    final emp = employeeNumber.trim();
+    if (emp.isEmpty) {
+      return const VerifyResponse(
+        isValid: false,
+        employeeId: null,
+        employeeNumber: null,
+        fullName: null,
+        isClockedIn: false,
+      );
+    }
+
+    final roster = await rosterAll();
+    final match = roster.where((e) => e.employeeNumber.trim() == emp).toList();
+
+    if (match.isEmpty) {
+      return const VerifyResponse(
+        isValid: false,
+        employeeId: null,
+        employeeNumber: null,
+        fullName: null,
+        isClockedIn: false,
+      );
+    }
+
+    final e = match.first;
+    return VerifyResponse(
+      isValid: true,
+      employeeId: e.employeeId,
+      employeeNumber: e.employeeNumber,
+      fullName: e.fullName,
+      isClockedIn: false, // UI/cache will correct this after calling status()
+    );
   }
 
   // =====================
@@ -180,8 +221,4 @@ class TimeClockApi {
     }
     return (node?.innerText ?? '').trim();
   }
-}
-
-extension _FirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
 }
