@@ -2,150 +2,56 @@ import 'package:xml/xml.dart';
 
 import '../../core/api_client.dart';
 import '../../core/Services/device_config_service.dart';
-
-import '../models/sync.dart';
-import '../models/verify.dart';
-import '../models/status.dart';
+import '../models/employee_directory_item.dart';
 import '../models/punch.dart';
+import '../models/status.dart';
+import '../models/sync.dart';
 
 class TimeClockApi {
+  final ApiClient _client;
   TimeClockApi(this._client);
 
-  final ApiClient _client;
+  String get _base => DeviceConfigService.baseUrl; // ex: https://tcws.tsg.bz/tsgtc.asmx
+  String get _auth => DeviceConfigService.authToken;
+  String get _kioskId => DeviceConfigService.kioskId;
 
-  static const String _ns = "http://tsg.bz/";
-  static const String _asmxPath = "/tsgtc.asmx";
+  String _ep(String method) => '$_base/$method';
 
-  // ===== Connectivity =====
   Future<void> ping() async {
-    final endpoint = _endpointUri();
-    await _client.ping(endpoint);
+    await getEmpsRaw();
   }
 
-  // ===== Step 1: Roster (GetEmps) =====
-  Future<List<RosterItem>> rosterAll() async {
-    final endpoint = _endpointUri();
-    final auth = DeviceConfigService.authToken.trim();
-
-    if (auth.isEmpty) {
-      throw Exception("Missing Auth Token (admin settings).");
-    }
-
-    final envelope = _soapEnvelope("""
-<GetEmps xmlns="$_ns">
-  <Auth>${_xmlEscape(auth)}</Auth>
-</GetEmps>
-""");
-
-    final xmlText = await _client.postSoap(
-      url: endpoint,
-      soapAction: "${_ns}GetEmps",
-      envelopeXml: envelope,
-    );
-
-    final raw = _extractResult(xmlText, "GetEmpsResult");
-    return _parseGetEmpsPairs(raw);
+  // =====================
+  // GetEmps
+  // =====================
+  Future<String> getEmpsRaw() async {
+    final xml = await _client.postForm(_ep('GetEmps'), {'Auth': _auth});
+    return _extractStringValue(xml);
   }
 
-  // Kept for compatibility (even if TabletScreen no longer calls it)
-  Future<VerifyResponse> verify(String employeeNumber) async {
-    final roster = await rosterAll();
-
-    final hit = roster.firstWhere(
-      (e) => e.employeeNumber.trim() == employeeNumber.trim(),
-      orElse: () => const RosterItem(
-        employeeId: "",
-        employeeNumber: "",
-        fullName: "",
-      ),
-    );
-
-    if (hit.employeeId.isEmpty) {
-      // IMPORTANT: VerifyResponse requires all fields
-      return const VerifyResponse(
-        isValid: false,
-        employeeId: "",
-        employeeNumber: "",
-        fullName: "",
-        isClockedIn: false,
-      );
-    }
-
-    // Until Step 2 (GetStatus) is wired, default isClockedIn to false.
-    return VerifyResponse(
-      isValid: true,
-      employeeId: hit.employeeId,
-      employeeNumber: hit.employeeNumber,
-      fullName: hit.fullName,
-      isClockedIn: false,
-    );
+  Future<List<EmployeeDirectoryItem>> rosterAll() async {
+    final raw = await getEmpsRaw();
+    return _parseGetEmps(raw);
   }
 
-  // ===== Step 2 (later): Status =====
-  Future<StatusResponse> status(String employeeId) {
-    throw UnimplementedError("status() not wired yet (needs GetStatusResult format).");
-  }
+  List<EmployeeDirectoryItem> _parseGetEmps(String raw) {
+    // Raw sample: "1000;Name;100060;LAST, FIRST;..."
+    final parts = raw
+        .split(';')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
 
-  // ===== Step 3 (later): Punch =====
-  Future<void> punch(PunchRequest req) {
-    throw UnimplementedError("punch() not wired yet (needs CollectPunchesResult format).");
-  }
-
-  // ===== Sync (later) =====
-  Future<SyncResult> syncBatch(SyncPunchBatch batch) {
-    throw UnimplementedError("syncBatch() not wired yet (needs backend behavior/format).");
-  }
-
-  // ===== Internal helpers =====
-  Uri _endpointUri() {
-    final raw = DeviceConfigService.baseUrl.trim();
-    if (raw.isEmpty) {
-      throw Exception("Missing Base URL (admin settings).");
-    }
-
-    final uri = Uri.parse(raw);
-
-    final isAsmx = uri.path.toLowerCase().endsWith(".asmx");
-    if (isAsmx) return uri;
-
-    return uri.replace(path: _asmxPath);
-  }
-
-  String _soapEnvelope(String bodyInnerXml) {
-    return """<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-               xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-               xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Body>
-$bodyInnerXml
-  </soap:Body>
-</soap:Envelope>""";
-  }
-
-  String _extractResult(String xmlText, String tagName) {
-    final doc = XmlDocument.parse(xmlText);
-    final node = doc.findAllElements(tagName).firstOrNull;
-    if (node == null) return "";
-    return node.innerText.trim();
-  }
-
-  List<RosterItem> _parseGetEmpsPairs(String raw) {
-    // Format: EmpId;Full Name;EmpId;Full Name;...
-    if (raw.trim().isEmpty) return [];
-
-    final parts = raw.split(";").map((e) => e.trim()).toList();
-    final out = <RosterItem>[];
+    final out = <EmployeeDirectoryItem>[];
 
     for (int i = 0; i + 1 < parts.length; i += 2) {
-      final id = parts[i].trim();
-      final name = parts[i + 1].trim();
+      final empNum = parts[i];
+      final name = parts[i + 1];
+      if (empNum.isEmpty || name.isEmpty) continue;
 
-      if (id.isEmpty || name.isEmpty) continue;
-
-      // Employee ID is what user types (can be non-numeric)
-      out.add(RosterItem(
-        employeeId: id,
-        employeeNumber: id,
+      out.add(EmployeeDirectoryItem(
+        employeeId: empNum, // TEMP until real GUID exists
+        employeeNumber: empNum,
         fullName: name,
       ));
     }
@@ -153,34 +59,129 @@ $bodyInnerXml
     return out;
   }
 
-  String _xmlEscape(String value) {
-    return value
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&apos;");
+  // =====================
+  // GetStatus (Step 2)
+  // =====================
+  Future<String> getStatusRaw({
+    required String empId,
+    required String macAddress,
+    required String currTime,
+    String otCode = '',
+  }) async {
+    final xml = await _client.postForm(_ep('GetStatus'), {
+      'EmpID': empId,
+      'MACAddress': macAddress,
+      'CurrTime': currTime,
+      'Auth': _auth,
+      'OTCode': otCode,
+    });
+
+    return _extractStringValue(xml);
+  }
+
+  Future<StatusResponse> status(String empId) async {
+    final nowLocal = DateTime.now();
+    final raw = await getStatusRaw(
+      empId: empId,
+      macAddress: _kioskId,
+      currTime: nowLocal.toIso8601String(),
+      otCode: '',
+    );
+
+    // NOTE: we don’t know the real output format yet.
+    // So we interpret common patterns safely:
+    // - contains "IN" => clocked in
+    // - equals "1" => clocked in
+    // - contains "OUT" => clocked out
+    final upper = raw.toUpperCase();
+    final isIn = upper.contains('IN') || raw.trim() == '1';
+    final isOut = upper.contains('OUT') || raw.trim() == '0';
+
+    // If ambiguous, default to cached behavior on UI side
+    final bool clockedIn = isIn && !isOut;
+
+    return StatusResponse(isClockedIn: clockedIn);
+  }
+
+  // =====================
+  // CollectPunches (Step 3)
+  // =====================
+  Future<String> collectPunchesRaw({
+    required String empId,
+    required String punchTime,
+    required String macAddress,
+    String otCode = '',
+  }) async {
+    final xml = await _client.postForm(_ep('CollectPunches'), {
+      'EmpID': empId,
+      'PunchTime': punchTime,
+      'MACAddress': macAddress,
+      'Auth': _auth,
+      'OTCode': otCode,
+    });
+
+    return _extractStringValue(xml);
+  }
+
+  Future<void> punch(PunchRequest req) async {
+    // Your web service doesn’t accept punchType directly;
+    // it uses PunchTime and server decides IN/OUT.
+    // We still queue punchType locally for UX + audit trail.
+    await collectPunchesRaw(
+      empId: req.employeeId,
+      punchTime: req.timestampUtc.toIso8601String(),
+      macAddress: _kioskId,
+      otCode: '',
+    );
+  }
+
+  // =====================
+  // SyncBatch (Step 4-ish)
+  // =====================
+  Future<SyncResult> syncBatch(SyncPunchBatch batch) async {
+    final accepted = <int>[];
+    int processed = 0;
+
+    for (final p in batch.punches) {
+      try {
+        await collectPunchesRaw(
+          empId: p.employeeId,
+          punchTime: p.timestampUtc.toIso8601String(),
+          macAddress: _kioskId,
+          otCode: '',
+        );
+
+        accepted.add(p.localSequenceNumber);
+        processed++;
+      } catch (_) {
+        // keep going; we only accept successful seq values
+      }
+    }
+
+    return SyncResult(
+      processed: processed,
+      acceptedSeq: accepted,
+    );
+  }
+
+  // =====================
+  // SOAP <string> parser
+  // =====================
+  String _extractStringValue(String xmlText) {
+    final doc = XmlDocument.parse(xmlText);
+
+    // Finds <string xmlns="..."> regardless of namespace
+    XmlElement? node;
+    for (final e in doc.descendants.whereType<XmlElement>()) {
+      if (e.name.local == 'string') {
+        node = e;
+        break;
+      }
+    }
+    return (node?.innerText ?? '').trim();
   }
 }
 
-extension _FirstOrNullExt<E> on Iterable<E> {
-  E? get firstOrNull => isEmpty ? null : first;
-}
-
-class RosterItem {
-  final String employeeId;
-  final String employeeNumber;
-  final String fullName;
-
-  const RosterItem({
-    required this.employeeId,
-    required this.employeeNumber,
-    required this.fullName,
-  });
-
-  Map<String, dynamic> toJson() => {
-        "employeeId": employeeId,
-        "employeeNumber": employeeNumber,
-        "fullName": fullName,
-      };
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }

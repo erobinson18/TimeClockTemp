@@ -2,40 +2,30 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
+  final http.Client _client;
   ApiClient({http.Client? client}) : _client = client ?? http.Client();
 
-  final http.Client _client;
-
-  Future<String> postSoap({
-    required Uri url,
-    required String soapAction,
-    required String envelopeXml,
-    Duration timeout = const Duration(seconds: 20),
-  }) async {
-    final res = await _client
-        .post(
-          url,
-          headers: {
-            "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": soapAction,
-          },
-          body: utf8.encode(envelopeXml),
-        )
-        .timeout(timeout);
+  Future<String> postForm(String url, Map<String, String> body, {Map<String, String>? headers}) async {
+    final res = await _client.post(
+      Uri.parse(url),
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        if (headers != null) ...headers,
+      },
+      body: body,
+    );
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception("HTTP ${res.statusCode}: ${res.body}");
+      throw Exception('HTTP ${res.statusCode}: ${res.body}');
     }
-
-    return res.body;
+    return utf8.decode(res.bodyBytes);
   }
 
-  Future<void> ping(Uri url, {Duration timeout = const Duration(seconds: 6)}) async {
-    final res = await _client.get(url).timeout(timeout);
-    if (res.statusCode < 200 || res.statusCode >= 500) {
-      throw Exception("Ping failed: HTTP ${res.statusCode}");
+  Future<String> get(String url, {Map<String, String>? headers}) async {
+    final res = await _client.get(Uri.parse(url), headers: headers);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('HTTP ${res.statusCode}: ${res.body}');
     }
+    return utf8.decode(res.bodyBytes);
   }
-
-  void dispose() => _client.close();
 }

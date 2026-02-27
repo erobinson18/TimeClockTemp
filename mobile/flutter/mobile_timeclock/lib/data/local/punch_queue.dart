@@ -1,47 +1,47 @@
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 class PunchQueue {
-  static const _key = "punch_queue_v1";
+  static const String boxName = 'punch_queue';
 
-  Future<List<Map<String, dynamic>>> all() async {
-    final prefs = await SharedPreferences.getInstance();
-    final str = prefs.getString(_key);
-    if (str == null || str.isEmpty) return [];
+  Box get _box => Hive.box(boxName);
 
-    final decoded = jsonDecode(str);
-    if (decoded is! List) return [];
-
-    return decoded
-        .whereType<Map>()
-        .map((m) => m.cast<String, dynamic>())
-        .toList();
+  Future<void> enqueue(Map<String, dynamic> payload) async {
+    final key = DateTime.now().microsecondsSinceEpoch.toString();
+    await _box.put(key, payload);
   }
 
-  Future<int> count() async => (await all()).length;
+  Future<int> count() async => _box.length;
 
-  Future<void> enqueue(Map<String, dynamic> punch) async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = await all();
-    list.add(punch);
-    await prefs.setString(_key, jsonEncode(list));
+  Future<List<Map<String, dynamic>>> all() async {
+    final out = <Map<String, dynamic>>[];
+    for (final k in _box.keys) {
+      final v = _box.get(k);
+      if (v is Map) {
+        out.add(v.map((key, value) => MapEntry(key.toString(), value)));
+      }
+    }
+    return out;
   }
 
   Future<void> clear() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_key);
+    await _box.clear();
   }
 
-  Future<void> removeByLocalSeq(Set<int> seqs) async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = await all();
+  Future<void> removeByLocalSeq(Set<int> acceptedSeq) async {
+    final keysToDelete = <dynamic>[];
 
-    final kept = list.where((p) {
-      final v = p["localSequenceNumber"];
-      final n = (v is num) ? v.toInt() : int.tryParse("$v") ?? -1;
-      return !seqs.contains(n);
-    }).toList();
+    for (final k in _box.keys) {
+      final v = _box.get(k);
+      if (v is Map) {
+        final seq = (v['localSequenceNumber'] as num?)?.toInt();
+        if (seq != null && acceptedSeq.contains(seq)) {
+          keysToDelete.add(k);
+        }
+      }
+    }
 
-    await prefs.setString(_key, jsonEncode(kept));
+    for (final k in keysToDelete) {
+      await _box.delete(k);
+    }
   }
 }

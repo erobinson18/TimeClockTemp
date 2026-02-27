@@ -46,8 +46,13 @@ class _TabletScreenState extends State<TabletScreen> {
   String? _fullName;
   bool _clockedIn = false;
 
+  // UX + telemetry
   String? _message;
   int _pendingCount = 0;
+
+  bool _syncing = false;
+  DateTime? _lastSyncAttemptLocal;
+  String? _lastSyncResult;
 
   // Device identifiers (Vista mapping can remain server-side)
   static const int deviceType = 1;
@@ -56,11 +61,13 @@ class _TabletScreenState extends State<TabletScreen> {
   Timer? _clockTimer;
   Timer? _syncTimer;
   DateTime _now = DateTime.now();
-  DateTime? _lastSyncAttemptLocal;
 
-  // Admin codes
-  static const String _adminServiceCode = "000000";
-  static const String _adminPunchLogCode = "999999";
+  // Admin codes (MATCH YOUR EXISTING CLOCK)
+  static const String _adminServiceCode = "009876"; // Change Server/Auth
+  static const String _adminPunchLogCode = "101010"; // Punch History
+
+  // UI overlay feedback
+  OverlayEntry? _toastEntry;
 
   @override
   void initState() {
@@ -79,6 +86,7 @@ class _TabletScreenState extends State<TabletScreen> {
   void dispose() {
     _clockTimer?.cancel();
     _syncTimer?.cancel();
+    _removeToast();
     super.dispose();
   }
 
@@ -87,6 +95,45 @@ class _TabletScreenState extends State<TabletScreen> {
     _clockTimer?.cancel();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
+    });
+  }
+
+  // ===== Toast Overlay =====
+  void _removeToast() {
+    _toastEntry?.remove();
+    _toastEntry = null;
+  }
+
+  void _showToast({
+    required String title,
+    String? subtitle,
+    required Color color,
+    required IconData icon,
+    Duration duration = const Duration(seconds: 2),
+  }) {
+    _removeToast();
+
+    final overlay = Overlay.of(context);
+    if (overlay == null) return;
+
+    _toastEntry = OverlayEntry(
+      builder: (_) => Positioned(
+        left: 24,
+        right: 24,
+        bottom: 24,
+        child: _PunchToast(
+          title: title,
+          subtitle: subtitle,
+          color: color,
+          icon: icon,
+        ),
+      ),
+    );
+
+    overlay.insert(_toastEntry!);
+
+    Future.delayed(duration, () {
+      if (mounted) _removeToast();
     });
   }
 
@@ -139,17 +186,24 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-  // ===== Step 1: Warm roster cache from GetEmps =====
+  // ===== Step 1: Warm roster cache =====
   Future<void> _warmupRoster() async {
     try {
       if (!await _isOnline()) return;
 
       final items = await _api.rosterAll();
-
-      // RosterCache expects {employeeId, employeeNumber, fullName}
       final json = items.map((e) => e.toJson()).toList();
       await _rosterCache.saveAll(json);
-    } catch (_) {}
+
+      _showToast(
+        title: "Employees Synced",
+        subtitle: "Roster refreshed from server.",
+        color: Colors.green,
+        icon: Icons.check_circle,
+      );
+    } catch (_) {
+      // don’t spam UI if this fails silently in the field
+    }
   }
 
   // ===== Queue UI =====
@@ -159,15 +213,25 @@ class _TabletScreenState extends State<TabletScreen> {
     setState(() => _pendingCount = c);
   }
 
-  // ===== Sync (placeholder until Step 3 is wired) =====
+  // ===== Sync =====
   Future<void> _trySync() async {
-    try {
-      _lastSyncAttemptLocal = DateTime.now();
+    if (_syncing) return;
 
-      if (!await _isOnline()) return;
+    _syncing = true;
+    _lastSyncAttemptLocal = DateTime.now();
+    if (mounted) setState(() => _lastSyncResult = null);
+
+    try {
+      if (!await _isOnline()) {
+        if (mounted) setState(() => _lastSyncResult = "Offline (no sync)");
+        return;
+      }
 
       final pending = await _queue.all();
-      if (pending.isEmpty) return;
+      if (pending.isEmpty) {
+        if (mounted) setState(() => _lastSyncResult = "No pending punches");
+        return;
+      }
 
       final punches = pending.map((p) {
         final punchType = (p["punchType"] as num?)?.toInt() ?? 0;
@@ -197,12 +261,32 @@ class _TabletScreenState extends State<TabletScreen> {
       await _refreshPending();
 
       if (!mounted) return;
-      setState(() => _message = "Synced ${result.processed} punch(es).");
+      setState(() {
+        _message = "Synced ${result.processed} punch(es).";
+        _lastSyncResult = "Synced ${result.processed} / ${punches.length}";
+      });
+
+      _showToast(
+        title: "Sync Complete",
+        subtitle: "Processed ${result.processed} punch(es).",
+        color: Colors.green,
+        icon: Icons.cloud_done,
+      );
 
       if (_employeeGuid != null) {
         await _loadStatus(_employeeGuid!);
       }
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) setState(() => _lastSyncResult = "Sync failed");
+      _showToast(
+        title: "Sync Failed",
+        subtitle: "Will retry automatically.",
+        color: Colors.orange,
+        icon: Icons.cloud_off,
+      );
+    } finally {
+      _syncing = false;
+    }
   }
 
   // ===== Verify =====
@@ -222,14 +306,15 @@ class _TabletScreenState extends State<TabletScreen> {
       return;
     }
 
+    // Admin codes
     if (_employeeNumber == _adminServiceCode) {
-      await _showServiceSettingsDialog();
+      await _showServiceSettingsSheet();
       _clearEntry();
       return;
     }
 
     if (_employeeNumber == _adminPunchLogCode) {
-      await _showPunchLogDialog();
+      await _showPunchHistorySheet();
       _clearEntry();
       return;
     }
@@ -241,13 +326,19 @@ class _TabletScreenState extends State<TabletScreen> {
 
     try {
       if (await _isOnline()) {
-        // Refresh roster from GetEmps and cache it
+        // refresh roster cache
         await _warmupRoster();
 
-        // Verify by searching cached roster
+        // verify from cache
         final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
         if (cached == null) {
           setState(() => _message = "Invalid Employee ID");
+          _showToast(
+            title: "Invalid ID",
+            subtitle: "Please try again.",
+            color: Colors.red,
+            icon: Icons.error,
+          );
           return;
         }
 
@@ -265,7 +356,6 @@ class _TabletScreenState extends State<TabletScreen> {
         _applyVerified(res, message: "Verified.");
         await _statusCache.setIsClockedIn(cached.employeeId, cachedClockedIn);
 
-        // Step 2 will make this real; for now it falls back to cache.
         await _loadStatus(cached.employeeId);
         return;
       }
@@ -274,6 +364,12 @@ class _TabletScreenState extends State<TabletScreen> {
       final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
       if (cached == null) {
         setState(() => _message = "Employee not found (offline).");
+        _showToast(
+          title: "Offline",
+          subtitle: "Employee not found in local cache.",
+          color: Colors.orange,
+          icon: Icons.wifi_off,
+        );
         return;
       }
 
@@ -289,15 +385,27 @@ class _TabletScreenState extends State<TabletScreen> {
       );
 
       _applyVerified(offlineRes, message: "Verified (offline).");
+      _showToast(
+        title: "Verified (Offline)",
+        subtitle: "Punches will queue until online.",
+        color: Colors.orange,
+        icon: Icons.wifi_off,
+      );
     } catch (_) {
       setState(() => _message = "Verify failed");
+      _showToast(
+        title: "Verify Failed",
+        subtitle: "Try again.",
+        color: Colors.red,
+        icon: Icons.error,
+      );
     } finally {
       if (!mounted) return;
       setState(() => _verifying = false);
     }
   }
 
-  // ===== Status (Step 2 later) =====
+  // ===== Status =====
   Future<void> _loadStatus(String guid) async {
     try {
       final StatusResponse s = await _api.status(guid);
@@ -312,7 +420,7 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-  // ===== Punch (Step 3 later) =====
+  // ===== Punch =====
   Future<void> _doPunch() async {
     if (!_verified || _employeeGuid == null) {
       setState(() => _message = "Verify first.");
@@ -337,6 +445,7 @@ class _TabletScreenState extends State<TabletScreen> {
       "longitude": null,
     };
 
+    // optimistic UI
     final newClockedIn = (punchType == 0);
     setState(() {
       _clockedIn = newClockedIn;
@@ -357,7 +466,14 @@ class _TabletScreenState extends State<TabletScreen> {
           timestampUtc: nowUtc,
         ));
 
-        await Future.delayed(const Duration(milliseconds: 75));
+        _showToast(
+          title: punchType == 0 ? "Clock In Success" : "Clock Out Success",
+          subtitle: _fullName,
+          color: Colors.green,
+          icon: Icons.check_circle,
+        );
+
+        await Future.delayed(const Duration(milliseconds: 100));
         await _loadStatus(_employeeGuid!);
 
         Future.delayed(const Duration(seconds: 2), _resetSession);
@@ -368,6 +484,13 @@ class _TabletScreenState extends State<TabletScreen> {
         if (!mounted) return;
         setState(() => _message = "Offline: Punch queued ($_pendingCount pending).");
 
+        _showToast(
+          title: "Offline",
+          subtitle: "Punch queued ($_pendingCount pending).",
+          color: Colors.orange,
+          icon: Icons.wifi_off,
+        );
+
         Future.delayed(const Duration(seconds: 2), _resetSession);
       }
     } catch (_) {
@@ -377,6 +500,13 @@ class _TabletScreenState extends State<TabletScreen> {
       if (!mounted) return;
       setState(() => _message = "Punch queued ($_pendingCount pending).");
 
+      _showToast(
+        title: "Queued",
+        subtitle: "Punch saved offline ($_pendingCount pending).",
+        color: Colors.orange,
+        icon: Icons.save,
+      );
+
       Future.delayed(const Duration(seconds: 2), _resetSession);
     } finally {
       if (!mounted) return;
@@ -384,126 +514,268 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-  // ===== Admin: Service settings =====
-  Future<void> _showServiceSettingsDialog() async {
+  // ===== Admin Sheets =====
+  Future<void> _showServiceSettingsSheet() async {
     final urlCtrl = TextEditingController(text: DeviceConfigService.baseUrl);
     final kioskCtrl = TextEditingController(text: DeviceConfigService.kioskId);
     final authCtrl = TextEditingController(text: DeviceConfigService.authToken);
 
-    await showDialog<void>(
+    await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (_) {
-        return AlertDialog(
-          title: const Text("Admin: Service Settings"),
-          content: SizedBox(
-            width: 520,
-            child: SingleChildScrollView(
-              child: Column(
+        return _AdminSheetScaffold(
+          title: "Service Settings",
+          subtitle: "Update server + auth. KioskId can be set later.",
+          child: Column(
+            children: [
+              _AdminTextField(
+                controller: urlCtrl,
+                label: "Service Base URL",
+                hint: "https://tcws.tsg.bz/tsgtc.asmx",
+                icon: Icons.link,
+              ),
+              const SizedBox(height: 12),
+              _AdminTextField(
+                controller: authCtrl,
+                label: "Auth Token",
+                hint: "Paste auth token",
+                icon: Icons.key,
+                obscure: true,
+              ),
+              const SizedBox(height: 12),
+              _AdminTextField(
+                controller: kioskCtrl,
+                label: "Kiosk ID",
+                hint: "tsg-eld-android",
+                icon: Icons.badge,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                "Format: tsg-<locationcode>-<platform> (ex: tsg-eld-android)",
+                style: TextStyle(fontSize: 12, color: Colors.white70),
+              ),
+              const SizedBox(height: 18),
+              Row(
                 children: [
-                  TextField(
-                    controller: urlCtrl,
-                    decoration: const InputDecoration(
-                      labelText: "Service Base URL",
-                      hintText: "https://tcws.tsg.bz OR https://tcws.tsg.bz/tsgtc.asmx",
+                  Expanded(
+                    child: _AdminButton(
+                      text: "Cancel",
+                      color: Colors.red,
+                      onTap: () => Navigator.pop(context),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: kioskCtrl,
-                    decoration: const InputDecoration(
-                      labelText: "Kiosk ID (MACAddress value)",
-                      hintText: "tsg-eld-android",
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _AdminButton(
+                      text: "Update",
+                      color: Colors.green,
+                      onTap: () async {
+                        await DeviceConfigService.setBaseUrl(urlCtrl.text);
+                        await DeviceConfigService.setAuthToken(authCtrl.text);
+                        await DeviceConfigService.setKioskId(kioskCtrl.text);
+
+                        if (mounted) {
+                          setState(() => _message = "Service settings saved.");
+                        }
+                        if (context.mounted) Navigator.pop(context);
+
+                        _showToast(
+                          title: "Updated",
+                          subtitle: "Service settings saved.",
+                          color: Colors.green,
+                          icon: Icons.check_circle,
+                        );
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: authCtrl,
-                    decoration: const InputDecoration(labelText: "Auth Token"),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    "Format: tsg-<locationcode>-<platform> (ex: tsg-eld-android)",
-                    style: TextStyle(fontSize: 12),
                   ),
                 ],
               ),
-            ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Cancel"),
-            ),
-            TextButton(
-              onPressed: () async {
-                await DeviceConfigService.setBaseUrl(urlCtrl.text);
-                await DeviceConfigService.setKioskId(kioskCtrl.text);
-                await DeviceConfigService.setAuthToken(authCtrl.text);
-
-                if (mounted) setState(() => _message = "Service settings saved.");
-                if (context.mounted) Navigator.pop(context);
-              },
-              child: const Text("Save"),
-            ),
-          ],
         );
       },
     );
   }
 
-  // ===== Admin: Punch log =====
-  Future<void> _showPunchLogDialog() async {
+  Future<void> _showPunchHistorySheet() async {
     final box = Hive.box('punch_queue');
     final keys = box.keys.toList();
-    final items = <Map<String, dynamic>>[];
 
-    for (final k in keys.reversed.take(25)) {
+    final items = <Map<String, dynamic>>[];
+    for (final k in keys.reversed.take(40)) {
       final v = box.get(k);
       if (v is Map) {
         items.add(v.map((key, value) => MapEntry(key.toString(), value)));
       }
     }
 
-    await showDialog<void>(
+    await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (_) {
-        return AlertDialog(
-          title: const Text("Admin: Punch Log"),
-          content: SizedBox(
-            width: 620,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text("Pending punches: $_pendingCount"),
-                const SizedBox(height: 12),
-                Flexible(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      children: items.map((m) {
-                        final emp = (m["employeeId"] ?? "").toString();
-                        final type = (m["punchType"] ?? "").toString();
-                        final ts = (m["timestampUtc"] ?? "").toString();
-                        final seq = (m["localSequenceNumber"] ?? "").toString();
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: Text(
-                            "Emp: $emp | Type: $type | Seq: $seq | UTC: $ts",
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        );
-                      }).toList(),
+        return _AdminSheetScaffold(
+          title: "Punch History",
+          subtitle: "Recent offline punches + tools",
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: _AdminStatCard(
+                      label: "Pending",
+                      value: _pendingCount.toString(),
+                      icon: Icons.pending_actions,
                     ),
                   ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _AdminStatCard(
+                      label: "Last Sync",
+                      value: _lastSyncAttemptLocal == null
+                          ? "--"
+                          : _formatSyncStamp(_lastSyncAttemptLocal!),
+                      icon: Icons.cloud,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _AdminButton(
+                      text: "Sync Employees",
+                      color: Colors.green,
+                      onTap: () async {
+                        await _warmupRoster();
+                        if (context.mounted) Navigator.pop(context);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _AdminButton(
+                      text: _syncing ? "Syncing..." : "Sync Now",
+                      color: Colors.blue,
+                      onTap: _syncing
+                          ? null
+                          : () async {
+                        await _trySync();
+                        if (context.mounted) Navigator.pop(context);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _AdminButton(
+                text: "Log Out / Reset",
+                color: Colors.red,
+                onTap: () async {
+                  _resetSession();
+                  if (context.mounted) Navigator.pop(context);
+                  _showToast(
+                    title: "Reset",
+                    subtitle: "Session cleared.",
+                    color: Colors.red,
+                    icon: Icons.logout,
+                  );
+                },
+              ),
+              const SizedBox(height: 14),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Recent Offline Punches",
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withOpacity(0.12)),
+                ),
+                child: SizedBox(
+                  height: 320,
+                  child: items.isEmpty
+                      ? const Center(
+                    child: Text(
+                      "No offline punches stored.",
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  )
+                      : ListView.separated(
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) => Divider(
+                      color: Colors.white.withOpacity(0.10),
+                      height: 16,
+                    ),
+                    itemBuilder: (_, i) {
+                      final m = items[i];
+                      final emp = (m["employeeId"] ?? "").toString();
+                      final type = (m["punchType"] ?? "").toString();
+                      final ts = (m["timestampUtc"] ?? "").toString();
+                      final seq = (m["localSequenceNumber"] ?? "").toString();
+
+                      final t = type == "0" ? "IN" : "OUT";
+
+                      return Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: (t == "IN" ? Colors.green : Colors.red)
+                                  .withOpacity(0.20),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.12),
+                              ),
+                            ),
+                            child: Text(
+                              t,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              "Emp: $emp  |  Seq: $seq\nUTC: $ts",
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                height: 1.2,
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              _AdminButton(
+                text: "Close",
+                color: Colors.white24,
+                onTap: () => Navigator.pop(context),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Close"),
-            ),
-          ],
         );
       },
     );
@@ -512,71 +784,80 @@ class _TabletScreenState extends State<TabletScreen> {
   // ===== UI =====
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final scale = (constraints.maxWidth / 1600.0).clamp(0.78, 1.0);
-        double s(double v) => v * scale;
+    return WillPopScope(
+      // B) Kiosk hardening: disable back navigation
+      onWillPop: () async => false,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final scale = (constraints.maxWidth / 1600.0).clamp(0.78, 1.0);
+          double s(double v) => v * scale;
 
-        final timeStr = _formatTime(_now);
-        final dateStr = _formatDate(_now);
+          final timeStr = _formatTime(_now);
+          final dateStr = _formatDate(_now);
 
-        final actionText = _clockedIn ? "CLOCK OUT" : "CLOCK IN";
-        final actionColor = _clockedIn ? Colors.red : Colors.green;
+          final actionText = _clockedIn ? "CLOCK OUT" : "CLOCK IN";
+          final actionColor = _clockedIn ? Colors.red : Colors.green;
 
-        final canVerify = !_verifying && !_punching;
-        final canPunch = _verified && !_verifying && !_punching;
+          final canVerify = !_verifying && !_punching;
+          final canPunch = _verified && !_verifying && !_punching;
 
-        return Scaffold(
-          backgroundColor: Colors.black,
-          body: SafeArea(
-            child: Stack(
-              children: [
-                Padding(
-                  padding: EdgeInsets.all(s(24)),
-                  child: Row(
-                    children: [
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          minWidth: s(320),
-                          maxWidth: s(400),
-                        ),
-                        child: _buildLeftPanel(canVerify, s),
-                      ),
-                      SizedBox(width: s(24)),
-                      Expanded(
-                        child: _buildRightPanel(
-                          s: s,
-                          timeStr: timeStr,
-                          dateStr: dateStr,
-                          actionText: actionText,
-                          actionColor: actionColor,
-                          canPunch: canPunch,
+          return Scaffold(
+            backgroundColor: Colors.black,
+            body: SafeArea(
+              child: Stack(
+                children: [
+                  // subtle “premium” gradient
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Colors.white.withOpacity(0.06),
+                              Colors.transparent,
+                              Colors.white.withOpacity(0.04),
+                            ],
+                          ),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                Positioned(
-                  left: s(24),
-                  top: s(10),
-                  child: Text(
-                    _lastSyncAttemptLocal == null
-                        ? "Pending offline punches: $_pendingCount"
-                        : "Last Sync Attempt: ${_formatSyncStamp(_lastSyncAttemptLocal!)}   |   Pending: $_pendingCount",
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.75),
-                      fontSize: s(12),
-                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
-                Positioned(
-                  right: s(24),
-                  top: s(10),
-                  child: TextButton(
-                    onPressed: _trySync,
+
+                  Padding(
+                    padding: EdgeInsets.all(s(24)),
+                    child: Row(
+                      children: [
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minWidth: s(320),
+                            maxWidth: s(400),
+                          ),
+                          child: _buildLeftPanel(canVerify, s),
+                        ),
+                        SizedBox(width: s(24)),
+                        Expanded(
+                          child: _buildRightPanel(
+                            s: s,
+                            timeStr: timeStr,
+                            dateStr: dateStr,
+                            actionText: actionText,
+                            actionColor: actionColor,
+                            canPunch: canPunch,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  Positioned(
+                    left: s(24),
+                    top: s(10),
                     child: Text(
-                      "Sync Now",
+                      _lastSyncAttemptLocal == null
+                          ? "Pending: $_pendingCount"
+                          : "Last Sync: ${_formatSyncStamp(_lastSyncAttemptLocal!)}   |   Pending: $_pendingCount   |   ${_lastSyncResult ?? ""}",
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.75),
                         fontSize: s(12),
@@ -584,24 +865,41 @@ class _TabletScreenState extends State<TabletScreen> {
                       ),
                     ),
                   ),
-                ),
-                Positioned(
-                  right: s(24),
-                  bottom: s(8),
-                  child: Text(
-                    "ver 4.0.1",
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.55),
-                      fontSize: s(12),
-                      fontWeight: FontWeight.w600,
+
+                  Positioned(
+                    right: s(24),
+                    top: s(10),
+                    child: TextButton(
+                      onPressed: _syncing ? null : _trySync,
+                      child: Text(
+                        _syncing ? "Syncing..." : "Sync Now",
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.75),
+                          fontSize: s(12),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ],
+
+                  Positioned(
+                    right: s(24),
+                    bottom: s(8),
+                    child: Text(
+                      "ver 4.0.1",
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.55),
+                        fontSize: s(12),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
@@ -671,17 +969,17 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
               child: _verifying
                   ? SizedBox(
-                      width: s(20),
-                      height: s(20),
-                      child: const CircularProgressIndicator(strokeWidth: 2),
-                    )
+                width: s(20),
+                height: s(20),
+                child: const CircularProgressIndicator(strokeWidth: 2),
+              )
                   : Text(
-                      "VERIFY",
-                      style: TextStyle(
-                        fontSize: s(18),
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+                "VERIFY",
+                style: TextStyle(
+                  fontSize: s(18),
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
             ),
           ),
         ],
@@ -697,7 +995,7 @@ class _TabletScreenState extends State<TabletScreen> {
     required Color actionColor,
     required bool canPunch,
   }) {
-    final clockBtnSize = s(160);
+    final clockBtnSize = s(170);
 
     return Container(
       padding: EdgeInsets.all(s(22)),
@@ -806,37 +1104,41 @@ class _TabletScreenState extends State<TabletScreen> {
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 150),
                 opacity: canPunch ? 1.0 : 0.35,
-                child: Container(
-                  width: clockBtnSize,
-                  height: clockBtnSize,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: actionColor,
-                    boxShadow: [
-                      BoxShadow(
-                        color: actionColor.withOpacity(0.30),
-                        blurRadius: s(18),
-                        spreadRadius: s(3),
-                      ),
-                    ],
-                  ),
-                  alignment: Alignment.center,
-                  child: _punching
-                      ? SizedBox(
-                          width: s(28),
-                          height: s(28),
-                          child: const CircularProgressIndicator(strokeWidth: 3),
-                        )
-                      : Text(
-                          actionText,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.black,
-                            fontSize: s(22),
-                            fontWeight: FontWeight.w900,
-                            height: 1.0,
-                          ),
+                child: AnimatedScale(
+                  scale: canPunch ? 1.0 : 0.98,
+                  duration: const Duration(milliseconds: 150),
+                  child: Container(
+                    width: clockBtnSize,
+                    height: clockBtnSize,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: actionColor,
+                      boxShadow: [
+                        BoxShadow(
+                          color: actionColor.withOpacity(0.30),
+                          blurRadius: s(18),
+                          spreadRadius: s(3),
                         ),
+                      ],
+                    ),
+                    alignment: Alignment.center,
+                    child: _punching
+                        ? SizedBox(
+                      width: s(28),
+                      height: s(28),
+                      child: const CircularProgressIndicator(strokeWidth: 3),
+                    )
+                        : Text(
+                      actionText,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontSize: s(22),
+                        fontWeight: FontWeight.w900,
+                        height: 1.0,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -901,12 +1203,12 @@ class _TabletScreenState extends State<TabletScreen> {
     return Row(
       children: labels
           .map((l) => Expanded(
-                child: _keyButton(
-                  label: l,
-                  onTap: () => _appendDigit(l),
-                  s: s,
-                ),
-              ))
+        child: _keyButton(
+          label: l,
+          onTap: () => _appendDigit(l),
+          s: s,
+        ),
+      ))
           .toList(),
     );
   }
@@ -939,7 +1241,7 @@ class _TabletScreenState extends State<TabletScreen> {
             style: TextStyle(
               color: Colors.white,
               fontSize: fontSize ?? s(26),
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w900,
               letterSpacing: s(1),
             ),
           ),
@@ -983,5 +1285,269 @@ class _TabletScreenState extends State<TabletScreen> {
     if (h == 0) h = 12;
 
     return "$mm/$dd/$yyyy $h:$m:$s $ampm";
+  }
+}
+
+// ===== Reusable Admin UI widgets (in-file to avoid import errors) =====
+
+class _AdminSheetScaffold extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Widget child;
+
+  const _AdminSheetScaffold({
+    required this.title,
+    required this.subtitle,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.of(context).viewInsets;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: viewInsets.bottom),
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.92,
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.92),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+          border: Border.all(color: Colors.white.withOpacity(0.12)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.admin_panel_settings, color: Colors.white),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close, color: Colors.white70),
+                    ),
+                  ],
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 14),
+                Expanded(
+                  child: SingleChildScrollView(child: child),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminTextField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final String hint;
+  final IconData icon;
+  final bool obscure;
+
+  const _AdminTextField({
+    required this.controller,
+    required this.label,
+    required this.hint,
+    required this.icon,
+    this.obscure = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      obscureText: obscure,
+      style: const TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        prefixIcon: Icon(icon, color: Colors.white70),
+        labelText: label,
+        labelStyle: const TextStyle(color: Colors.white70),
+        hintText: hint,
+        hintStyle: const TextStyle(color: Colors.white38),
+        filled: true,
+        fillColor: Colors.white.withOpacity(0.06),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.12)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.28)),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminButton extends StatelessWidget {
+  final String text;
+  final Color color;
+  final VoidCallback? onTap;
+
+  const _AdminButton({
+    required this.text,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 54,
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color.withOpacity(0.85),
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        ),
+        child: Text(
+          text,
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminStatCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+
+  const _AdminStatCard({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.12)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.white70),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PunchToast extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final Color color;
+  final IconData icon;
+
+  const _PunchToast({
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.86),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withOpacity(0.10)),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.30),
+              blurRadius: 18,
+              spreadRadius: 2,
+            )
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.18),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withOpacity(0.10)),
+              ),
+              child: Icon(icon, color: Colors.white),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
