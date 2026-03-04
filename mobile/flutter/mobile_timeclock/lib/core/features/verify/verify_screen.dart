@@ -5,7 +5,6 @@ import '../../api_client.dart';
 import '../../../data/remote/timeclock_api.dart';
 import '../../../data/local/roster_cache.dart';
 import '../../../data/local/status_cache.dart';
-import '../../../data/models/verify.dart';
 import '../../../main.dart';
 
 class VerifyScreen extends StatefulWidget {
@@ -56,6 +55,8 @@ class _VerifyScreenState extends State<VerifyScreen> {
   }
 
   Future<void> _verify() async {
+    final nav = Navigator.of(context); // capture BEFORE awaits
+
     final empNum = _ctrl.text.trim();
     if (empNum.isEmpty) {
       setState(() => _msg = "Enter your Employee ID.");
@@ -78,26 +79,14 @@ class _VerifyScreenState extends State<VerifyScreen> {
         return;
       }
 
-      final cachedClockedIn =
-          _statusCache.getIsClockedIn(cached.employeeId) ?? false;
+      // Optional: read cached status for UX (not required for navigation)
+      _statusCache.getIsClockedIn(cached.employeeId);
 
-      // (Optional) You can use this later if you want to display details here
-      final _ = VerifyResponse(
-        isValid: true,
-        employeeId: cached.employeeId,
-        employeeNumber: cached.employeeNumber,
-        fullName: cached.fullName,
-        isClockedIn: cachedClockedIn,
-      );
-
-      // Use context safely after awaits
-      if (!context.mounted) return;
-
-      Navigator.of(context).pushNamed(Routes.status, arguments: cached.employeeId);
+      if (!mounted) return;
+      nav.pushNamed(Routes.status, arguments: cached.employeeId);
     } catch (e) {
       if (mounted) setState(() => _msg = "Verify failed: $e");
     } finally {
-      // no returns in finally
       if (mounted) setState(() => _loading = false);
     }
   }

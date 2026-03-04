@@ -2,11 +2,13 @@ import 'package:xml/xml.dart';
 
 import '../../core/api_client.dart';
 import '../../core/Services/device_config_service.dart';
+
 import '../models/employee_directory_item.dart';
 import '../models/punch.dart';
 import '../models/status.dart';
 import '../models/sync.dart';
 import '../models/verify.dart';
+import '../models/validate_code.dart';
 
 class TimeClockApi {
   final ApiClient _client;
@@ -19,6 +21,7 @@ class TimeClockApi {
   String _ep(String method) => '$_base/$method';
 
   Future<void> ping() async {
+    // cheap, reliable call to prove the server is reachable
     await getEmpsRaw();
   }
 
@@ -61,10 +64,8 @@ class TimeClockApi {
   }
 
   // =====================
-  // Verify (compat method)
+  // Verify (compat)
   // =====================
-  /// Some screens expect TimeClockApi.verify(employeeNumber).
-  /// Your server does not appear to have a Verify endpoint, so we verify by roster lookup.
   Future<VerifyResponse> verify(String employeeNumber) async {
     final emp = employeeNumber.trim();
     if (emp.isEmpty) {
@@ -96,7 +97,7 @@ class TimeClockApi {
       employeeId: e.employeeId,
       employeeNumber: e.employeeNumber,
       fullName: e.fullName,
-      isClockedIn: false, // UI/cache will correct this after calling status()
+      isClockedIn: false, // UI/cache will correct after calling status()
     );
   }
 
@@ -122,26 +123,73 @@ class TimeClockApi {
 
   Future<StatusResponse> status(String empId) async {
     final nowLocal = DateTime.now();
+
     final raw = await getStatusRaw(
       empId: empId,
       macAddress: _kioskId,
-      currTime: nowLocal.toIso8601String(),
+      currTime: _isoLocalNoMillis(nowLocal), // ✅ no milliseconds
       otCode: '',
     );
 
-    // NOTE: we don’t know the real output format yet.
-    // So we interpret common patterns safely:
-    // - contains "IN" => clocked in
-    // - equals "1" => clocked in
-    // - contains "OUT" => clocked out
-    final upper = raw.toUpperCase();
-    final isIn = upper.contains('IN') || raw.trim() == '1';
-    final isOut = upper.contains('OUT') || raw.trim() == '0';
+    final parsed = _parseGetStatus(raw);
 
-    // If ambiguous, default to cached behavior on UI side
-    final bool clockedIn = isIn && !isOut;
+    return StatusResponse(
+      isClockedIn: parsed.isClockedIn,
+      fullName: parsed.fullName,
+      rawStatus: parsed.rawStatus,
+    );
+  }
 
-    return StatusResponse(isClockedIn: clockedIn);
+  _ParsedStatus _parseGetStatus(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return const _ParsedStatus(isClockedIn: false, fullName: null, rawStatus: null);
+    }
+
+    // Primary: NAME;IN|OUT
+    if (trimmed.contains(';')) {
+      final parts = trimmed.split(';');
+      final namePart = parts.isNotEmpty ? parts[0].trim() : '';
+      final statusPart = parts.length > 1 ? parts[1].trim() : '';
+
+      final normalized = statusPart.toUpperCase();
+      final isIn = normalized == 'IN';
+      final isOut = normalized == 'OUT';
+
+      if (isIn || isOut) {
+        return _ParsedStatus(
+          isClockedIn: isIn,
+          fullName: namePart.isEmpty ? null : namePart,
+          rawStatus: normalized,
+        );
+      }
+
+      // Weird after ';' => fall back but keep name
+      final generic = _genericStatusDetect(trimmed);
+      return _ParsedStatus(
+        isClockedIn: generic.isClockedIn,
+        fullName: namePart.isEmpty ? null : namePart,
+        rawStatus: generic.rawStatus,
+      );
+    }
+
+    return _genericStatusDetect(trimmed);
+  }
+
+  _ParsedStatus _genericStatusDetect(String raw) {
+    final t = raw.trim();
+    final upper = t.toUpperCase();
+
+    if (t == '1') return const _ParsedStatus(isClockedIn: true, fullName: null, rawStatus: 'IN');
+    if (t == '0') return const _ParsedStatus(isClockedIn: false, fullName: null, rawStatus: 'OUT');
+
+    final containsIn = upper.contains('IN');
+    final containsOut = upper.contains('OUT');
+
+    if (containsIn && !containsOut) return const _ParsedStatus(isClockedIn: true, fullName: null, rawStatus: 'IN');
+    if (containsOut && !containsIn) return const _ParsedStatus(isClockedIn: false, fullName: null, rawStatus: 'OUT');
+
+    return _ParsedStatus(isClockedIn: false, fullName: null, rawStatus: upper.isEmpty ? null : upper);
   }
 
   // =====================
@@ -164,45 +212,113 @@ class TimeClockApi {
     return _extractStringValue(xml);
   }
 
-  Future<void> punch(PunchRequest req) async {
-    // Your web service doesn’t accept punchType directly;
-    // it uses PunchTime and server decides IN/OUT.
-    // We still queue punchType locally for UX + audit trail.
+  Future<void> punch(PunchRequest req, {String otCode = ''}) async {
+    final punchTime = _isoUtcNoMillis(req.timestampUtc.toUtc());
     await collectPunchesRaw(
       empId: req.employeeId,
-      punchTime: req.timestampUtc.toIso8601String(),
+      punchTime: punchTime,
       macAddress: _kioskId,
-      otCode: '',
+      otCode: otCode,
     );
   }
 
+  Future<StatusResponse> punchAndGetStatus(PunchRequest req, {String otCode = ''}) async {
+    await punch(req, otCode: otCode);
+    await Future.delayed(const Duration(milliseconds: 150));
+    return status(req.employeeId);
+  }
+
   // =====================
-  // SyncBatch (Step 4-ish)
+  // SyncBatch
   // =====================
-  Future<SyncResult> syncBatch(SyncPunchBatch batch) async {
+  Future<SyncResult> syncBatch(SyncPunchBatch batch, {String otCode = ''}) async {
     final accepted = <int>[];
     int processed = 0;
 
     for (final p in batch.punches) {
       try {
+        final punchTime = _isoUtcNoMillis(p.timestampUtc.toUtc());
+
         await collectPunchesRaw(
           empId: p.employeeId,
-          punchTime: p.timestampUtc.toIso8601String(),
+          punchTime: punchTime,
           macAddress: _kioskId,
-          otCode: '',
+          otCode: otCode,
         );
 
         accepted.add(p.localSequenceNumber);
         processed++;
       } catch (_) {
-        // keep going; we only accept successful seq values
+        // keep going
       }
     }
 
-    return SyncResult(
-      processed: processed,
-      acceptedSeq: accepted,
+    return SyncResult(processed: processed, acceptedSeq: accepted);
+  }
+
+  // =====================
+  // ValidateCode (Step 4)
+  // =====================
+  Future<String> validateCodeRaw({
+    required String otCode,
+    required String action,
+  }) async {
+    final xml = await _client.postForm(_ep('ValidateCode'), {
+      'OTCode': otCode,
+      'Auth': _auth,
+      'Action': action,
+    });
+
+    return _extractStringValue(xml);
+  }
+
+  /// Accepts:
+  /// - "true" / "false" (your example shows false)
+  /// - "Success" (some environments)
+  Future<ValidateCodeResponse> validateCode({
+    required String otCode,
+    required String action,
+  }) async {
+    final raw = await validateCodeRaw(
+      otCode: otCode,
+      action: action,
     );
+
+    final t = raw.trim().toLowerCase();
+    final ok = (t == 'true' || t == 'success' || t == '1' || t == 'ok');
+
+    return ValidateCodeResponse(ok: ok, rawMessage: raw.trim());
+  }
+
+  // =====================
+  // Helpers
+  // =====================
+
+  /// ISO 8601 *LOCAL* time without milliseconds: YYYY-MM-DDTHH:mm:ss
+  String _isoLocalNoMillis(DateTime local) {
+    final dt = local;
+    final yyyy = dt.year.toString().padLeft(4, '0');
+    final mm = dt.month.toString().padLeft(2, '0');
+    final dd = dt.day.toString().padLeft(2, '0');
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final min = dt.minute.toString().padLeft(2, '0');
+    final ss = dt.second.toString().padLeft(2, '0');
+    return '$yyyy-$mm-$dd'
+        'T$hh:$min:$ss';
+  }
+
+  /// ISO 8601 UTC without milliseconds: YYYY-MM-DDTHH:mm:ssZ
+  String _isoUtcNoMillis(DateTime utc) {
+    final dt = utc.toUtc();
+    final yyyy = dt.year.toString().padLeft(4, '0');
+    final mm = dt.month.toString().padLeft(2, '0');
+    final dd = dt.day.toString().padLeft(2, '0');
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final min = dt.minute.toString().padLeft(2, '0');
+    final ss = dt.second.toString().padLeft(2, '0');
+    return '$yyyy-$mm-$dd'
+        'T$hh:$min:$ss'
+        'Z';
   }
 
   // =====================
@@ -211,7 +327,6 @@ class TimeClockApi {
   String _extractStringValue(String xmlText) {
     final doc = XmlDocument.parse(xmlText);
 
-    // Finds <string xmlns="..."> regardless of namespace
     XmlElement? node;
     for (final e in doc.descendants.whereType<XmlElement>()) {
       if (e.name.local == 'string') {
@@ -221,4 +336,16 @@ class TimeClockApi {
     }
     return (node?.innerText ?? '').trim();
   }
+}
+
+class _ParsedStatus {
+  final bool isClockedIn;
+  final String? fullName;
+  final String? rawStatus;
+
+  const _ParsedStatus({
+    required this.isClockedIn,
+    required this.fullName,
+    required this.rawStatus,
+  });
 }

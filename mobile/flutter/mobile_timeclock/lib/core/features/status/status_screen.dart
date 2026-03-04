@@ -25,6 +25,9 @@ class _StatusScreenState extends State<StatusScreen> {
   bool _forceOffline = false;
   String? _msg;
 
+  String? _employeeName;
+  String? _rawStatus;
+
   static const int deviceType = 1;
   static const String deviceId = "KIOSK-TEST-01";
 
@@ -38,9 +41,58 @@ class _StatusScreenState extends State<StatusScreen> {
   @override
   void initState() {
     super.initState();
-    _api = TimeClockApi(ApiClient());
+
+    _api = TimeClockApi(ApiClient(
+      log: (m) => debugPrint(m),
+    ));
+
+    _hydrateFromCache();
     _load();
     _refreshPending();
+  }
+
+  void _hydrateFromCache() {
+    final cachedClockedIn = _statusCache.getIsClockedIn(widget.employeeGuid);
+    final cachedName = _statusCache.getDisplayName(widget.employeeGuid);
+    final cachedRaw = _statusCache.getRawStatus(widget.employeeGuid);
+
+    setState(() {
+      if (cachedClockedIn != null) _clockedIn = cachedClockedIn;
+      _employeeName = cachedName;
+      _rawStatus = cachedRaw;
+    });
+  }
+
+  bool get _isAmbiguousStatus {
+    final s = _rawStatus?.trim().toUpperCase();
+    if (s == null || s.isEmpty) return true;
+    return !(s == 'IN' || s == 'OUT');
+  }
+
+  Future<void> _applyStatusAndCache({
+    required bool isClockedIn,
+    String? fullName,
+    String? rawStatus,
+  }) async {
+    setState(() {
+      _clockedIn = isClockedIn;
+      if (fullName != null && fullName.trim().isNotEmpty) {
+        _employeeName = fullName.trim();
+      }
+      if (rawStatus != null && rawStatus.trim().isNotEmpty) {
+        _rawStatus = rawStatus.trim();
+      }
+    });
+
+    await _statusCache.setIsClockedIn(widget.employeeGuid, isClockedIn);
+
+    if (fullName != null && fullName.trim().isNotEmpty) {
+      await _statusCache.setDisplayName(widget.employeeGuid, fullName.trim());
+    }
+
+    if (rawStatus != null && rawStatus.trim().isNotEmpty) {
+      await _statusCache.setRawStatus(widget.employeeGuid, rawStatus.trim());
+    }
   }
 
   Future<void> _load() async {
@@ -53,16 +105,18 @@ class _StatusScreenState extends State<StatusScreen> {
       final s = await _api.status(widget.employeeGuid);
       if (!mounted) return;
 
-      setState(() => _clockedIn = s.isClockedIn);
-      await _statusCache.setIsClockedIn(widget.employeeGuid, s.isClockedIn);
-    } catch (e) {
-      final cached = _statusCache.getIsClockedIn(widget.employeeGuid);
-      if (cached != null && mounted) {
-        setState(() => _clockedIn = cached);
+      await _applyStatusAndCache(
+        isClockedIn: s.isClockedIn,
+        fullName: s.fullName,
+        rawStatus: s.rawStatus,
+      );
+
+      if (_isAmbiguousStatus && mounted) {
+        setState(() => _msg = "Status received but looked weird. Tap refresh.");
       }
+    } catch (e) {
       if (mounted) setState(() => _msg = "Status failed: $e");
     } finally {
-      // no returns in finally
       if (mounted) setState(() => _loading = false);
     }
   }
@@ -106,13 +160,30 @@ class _StatusScreenState extends State<StatusScreen> {
       'longitude': null,
     };
 
-    final bool newClockedIn = (punchType == 0);
-    setState(() => _clockedIn = newClockedIn);
-    await _statusCache.setIsClockedIn(widget.employeeGuid, newClockedIn);
-
     try {
-      if (await _isOnline()) {
-        await _api.punch(PunchRequest(
+      final online = await _isOnline();
+
+      // Online + ambiguous => force refresh; do not guess.
+      if (online && _isAmbiguousStatus) {
+        if (mounted) {
+          setState(() {
+            _msg = "Status unclear. Please refresh before punching.";
+            _loading = false;
+          });
+        }
+        return;
+      }
+
+      // Optimistic local update for UX (will be corrected by server on success)
+      final bool optimisticClockedIn = (punchType == 0);
+      await _applyStatusAndCache(
+        isClockedIn: optimisticClockedIn,
+        rawStatus: optimisticClockedIn ? "IN" : "OUT",
+      );
+
+      if (online) {
+        // Server-truth punch: CollectPunches then GetStatus and return final status
+        final s = await _api.punchAndGetStatus(PunchRequest(
           employeeId: widget.employeeGuid,
           punchType: punchType,
           deviceType: deviceType,
@@ -121,8 +192,13 @@ class _StatusScreenState extends State<StatusScreen> {
           timestampUtc: nowUtc,
         ));
 
-        await Future.delayed(const Duration(milliseconds: 150));
-        await _load();
+        if (!mounted) return;
+
+        await _applyStatusAndCache(
+          isClockedIn: s.isClockedIn,
+          fullName: s.fullName,
+          rawStatus: s.rawStatus,
+        );
       } else {
         await _queue.enqueue(payload);
         await _refreshPending();
@@ -131,13 +207,18 @@ class _StatusScreenState extends State<StatusScreen> {
         }
       }
     } catch (e) {
-      await _queue.enqueue(payload);
-      await _refreshPending();
+      // If punch fails, queue for safety
+      try {
+        await _queue.enqueue(payload);
+        await _refreshPending();
+      } catch (_) {
+        // ignore queue failure; show original error
+      }
+
       if (mounted) {
-        setState(() => _msg = "Punch failed; queued ($_pendingCount pending). Error: $e");
+        setState(() => _msg = "Punch failed; queued if possible. Error: $e");
       }
     } finally {
-      // no returns in finally
       if (mounted) setState(() => _loading = false);
     }
   }
@@ -179,13 +260,17 @@ class _StatusScreenState extends State<StatusScreen> {
         punches: punches,
       );
 
-      await _api.syncBatch(batch);
+      final result = await _api.syncBatch(batch);
 
-      await _queue.clear();
+      // Remove only punches confirmed sent successfully
+      await _queue.removeByLocalSeq(result.acceptedSeq.toSet());
+
       await _refreshPending();
       await _load();
 
-      if (mounted) setState(() => _msg = "Synced ${punches.length} punches.");
+      if (mounted) {
+        setState(() => _msg = "Synced ${result.acceptedSeq.length} punches.");
+      }
     } catch (e) {
       if (mounted) setState(() => _msg = "Sync failed: $e");
     }
@@ -194,6 +279,14 @@ class _StatusScreenState extends State<StatusScreen> {
   @override
   Widget build(BuildContext context) {
     final buttonText = _clockedIn ? "Clock Out" : "Clock In";
+
+    final displayName = (_employeeName == null || _employeeName!.trim().isEmpty)
+        ? "(unknown)"
+        : _employeeName!.trim();
+
+    final displayRaw = (_rawStatus == null || _rawStatus!.trim().isEmpty)
+        ? (_clockedIn ? "IN" : "OUT")
+        : _rawStatus!.trim().toUpperCase();
 
     return Scaffold(
       appBar: AppBar(
@@ -213,6 +306,10 @@ class _StatusScreenState extends State<StatusScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text("Employee GUID: ${widget.employeeGuid}"),
+            const SizedBox(height: 8),
+            Text("Employee: $displayName"),
+            const SizedBox(height: 8),
+            Text("Server Status: $displayRaw"),
             const SizedBox(height: 12),
             Text("Pending offline punches: $_pendingCount"),
             Row(
@@ -239,7 +336,7 @@ class _StatusScreenState extends State<StatusScreen> {
               child: const Text("Clear Offline Queue"),
             ),
             const SizedBox(height: 10),
-            Text("Status: ${_clockedIn ? "CLOCKED IN" : "CLOCKED OUT"}"),
+            Text("Local Status: ${_clockedIn ? "CLOCKED IN" : "CLOCKED OUT"}"),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: _loading ? null : _doPunch,

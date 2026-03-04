@@ -19,6 +19,8 @@ dependencies:
   # Local storage
   hive: ^2.2.3
   hive_flutter: ^1.1.0
+
+  # Needed by secure_hive.dart + punch_integrity.dart
   flutter_secure_storage: ^9.2.2
   crypto: ^3.0.3
 

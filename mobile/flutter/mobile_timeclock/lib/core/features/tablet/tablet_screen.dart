@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
@@ -7,7 +8,6 @@ import 'package:hive_flutter/hive_flutter.dart';
 
 import '../../api_client.dart';
 import '../../Services/device_config_service.dart';
-import '../../services/admin_pin_service.dart';
 import '../../services/heartbeat_service.dart';
 import '../../services/remote_config_service.dart';
 
@@ -64,14 +64,21 @@ class _TabletScreenState extends State<TabletScreen> {
   DateTime _now = DateTime.now();
   DateTime? _lastSyncAttemptLocal;
 
-  // Admin codes (your existing pattern)
+  // Special access codes (ONLY way to open these screens)
   static const String _adminServiceCode = "009876";
   static const String _adminPunchLogCode = "101010";
+
+  // Phase 4: ValidateCode "Action" parameter
+  // If your server expects a different action token, change it here:
+  static const String _validateActionPunch = "PUNCH";
 
   @override
   void initState() {
     super.initState();
-    _api = TimeClockApi(ApiClient());
+
+    _api = TimeClockApi(ApiClient(
+      log: (m) => debugPrint(m),
+    ));
     _heartbeat = HeartbeatService(api: _api);
 
     _refreshPending();
@@ -141,7 +148,9 @@ class _TabletScreenState extends State<TabletScreen> {
   // ===== Connectivity =====
   Future<bool> _isOnline() async {
     final results = await _connectivity.checkConnectivity();
-    if (results.contains(ConnectivityResult.none)) return false;
+    if (results.contains(ConnectivityResult.none)) {
+      return false;
+    }
 
     try {
       await _api.ping();
@@ -168,7 +177,7 @@ class _TabletScreenState extends State<TabletScreen> {
     setState(() => _pendingCount = c);
   }
 
-  // ===== Sync (uses verified queue items) =====
+  // ===== Sync =====
   Future<void> _trySync() async {
     try {
       _lastSyncAttemptLocal = DateTime.now();
@@ -181,6 +190,7 @@ class _TabletScreenState extends State<TabletScreen> {
       final punches = pending.map((p) {
         final punchType = (p["punchType"] as num?)?.toInt() ?? 0;
         final localSeq = (p["localSequenceNumber"] as num?)?.toInt() ?? 0;
+
         final ts = (p["timestampUtc"] as String?) ??
             DateTime.now().toUtc().toIso8601String();
 
@@ -227,24 +237,22 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   Future<void> _verifyEmployee() async {
-    if (_employeeNumber.isEmpty) {
+    final entry = _employeeNumber.trim();
+
+    if (entry.isEmpty) {
       setState(() => _message = "Enter your Employee ID.");
       return;
     }
 
-    // Admin codes
-    if (_employeeNumber == _adminServiceCode) {
+    // ✅ SPECIAL CODES MUST ALWAYS WIN (ONLINE/OFFLINE DOESN'T MATTER)
+    if (entry == _adminServiceCode) {
       _clearEntry();
-      final ok = await _adminGate();
-      if (!ok) return;
       await _showServiceSettingsDialog();
       return;
     }
 
-    if (_employeeNumber == _adminPunchLogCode) {
+    if (entry == _adminPunchLogCode) {
       _clearEntry();
-      final ok = await _adminGate();
-      if (!ok) return;
       await _showPunchLogDialog();
       return;
     }
@@ -255,56 +263,40 @@ class _TabletScreenState extends State<TabletScreen> {
     });
 
     try {
-      if (await _isOnline()) {
+      final online = await _isOnline();
+      if (online) {
         await _warmupRoster();
-
-        final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
-        if (cached == null) {
-          if (mounted) setState(() => _message = "Invalid Employee ID");
-          return;
-        }
-
-        final cachedClockedIn =
-            _statusCache.getIsClockedIn(cached.employeeId) ?? false;
-
-        final res = VerifyResponse(
-          isValid: true,
-          employeeId: cached.employeeId,
-          employeeNumber: cached.employeeNumber,
-          fullName: cached.fullName,
-          isClockedIn: cachedClockedIn,
-        );
-
-        _applyVerified(res, message: "Verified.");
-        await _statusCache.setIsClockedIn(cached.employeeId, cachedClockedIn);
-
-        await _loadStatus(cached.employeeId);
-        return;
       }
 
-      // Offline verify
-      final cached = await _rosterCache.findByEmployeeNumber(_employeeNumber);
+      final cached = await _rosterCache.findByEmployeeNumber(entry);
       if (cached == null) {
-        if (mounted) setState(() => _message = "Employee not found (offline).");
+        if (mounted) setState(() => _message = "Invalid Employee ID.");
         return;
       }
 
       final cachedClockedIn =
           _statusCache.getIsClockedIn(cached.employeeId) ?? false;
 
-      final offlineRes = VerifyResponse(
-        isValid: true,
-        employeeId: cached.employeeId,
-        employeeNumber: cached.employeeNumber,
-        fullName: cached.fullName,
-        isClockedIn: cachedClockedIn,
+      _applyVerified(
+        VerifyResponse(
+          isValid: true,
+          employeeId: cached.employeeId,
+          employeeNumber: cached.employeeNumber,
+          fullName: cached.fullName,
+          isClockedIn: cachedClockedIn,
+        ),
+        message: online ? "Verified." : "Verified (offline).",
       );
 
-      _applyVerified(offlineRes, message: "Verified (offline).");
+      await _statusCache.setIsClockedIn(cached.employeeId, cachedClockedIn);
+
+      // If online, trust server status to correct cached bool
+      if (online) {
+        await _loadStatus(cached.employeeId);
+      }
     } catch (_) {
-      if (mounted) setState(() => _message = "Verify failed");
+      if (mounted) setState(() => _message = "Verify failed.");
     } finally {
-      // no returns in finally
       if (mounted) setState(() => _verifying = false);
     }
   }
@@ -324,6 +316,76 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
+  // ===== Phase 4 helper: prompt + validate OTCode (online only) =====
+  Future<String?> _promptForOtCodeIfNeeded() async {
+    // Only prompt when online (offline must still work)
+    final online = await _isOnline();
+    if (!online) return null;
+
+    final ctrl = TextEditingController();
+
+    final res = await showDialog<String?>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text("Optional Site / OT Code"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "If your company requires a site/OT code for this punch, enter it now.\n\n"
+                    "Leave blank to punch normally.",
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                decoration: const InputDecoration(
+                  labelText: "OT Code (optional)",
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.text,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => Navigator.of(context).pop(ctrl.text.trim()),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(null),
+              child: const Text("Cancel"),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(ctrl.text.trim()),
+              child: const Text("Continue"),
+            ),
+          ],
+        );
+      },
+    );
+
+    // null = user canceled dialog
+    return res;
+  }
+
+  Future<bool> _validateOtCodeIfProvided(String otCode) async {
+    final code = otCode.trim();
+    if (code.isEmpty) return true; // nothing to validate
+
+    final result = await _api.validateCode(
+      otCode: code,
+      action: _validateActionPunch,
+    );
+
+    if (!result.ok) {
+      if (!mounted) return false;
+      setState(() => _message = "Invalid code: ${result.rawMessage}");
+      return false;
+    }
+
+    return true;
+  }
+
   // ===== Punch =====
   Future<void> _doPunch() async {
     if (!_verified || _employeeGuid == null || _employeeGuid!.trim().isEmpty) {
@@ -338,17 +400,21 @@ class _TabletScreenState extends State<TabletScreen> {
 
     final punchType = _clockedIn ? 1 : 0;
     final seq = _seqStore.next();
+
+    // IMPORTANT: queue timestamp MUST NOT have milliseconds.
     final nowUtc = DateTime.now().toUtc();
+    final tsUtcNoMillis = _isoUtcNoMillis(nowUtc);
 
     final queuedPayload = <String, dynamic>{
       "employeeId": _employeeGuid!,
       "punchType": punchType,
       "localSequenceNumber": seq,
-      "timestampUtc": nowUtc.toIso8601String(),
+      "timestampUtc": tsUtcNoMillis, // ✅ no milliseconds
       "latitude": null,
       "longitude": null,
     };
 
+    // optimistic UX
     final newClockedIn = (punchType == 0);
     setState(() {
       _clockedIn = newClockedIn;
@@ -360,17 +426,52 @@ class _TabletScreenState extends State<TabletScreen> {
       final online = await _isOnline();
 
       if (online) {
-        await _api.punch(PunchRequest(
-          employeeId: _employeeGuid!,
-          punchType: punchType,
-          deviceType: deviceType,
-          deviceId: deviceId,
-          localSequenceNumber: seq,
-          timestampUtc: nowUtc,
-        ));
+        // Phase 4: prompt for optional code and validate before punching
+        final otPrompt = await _promptForOtCodeIfNeeded();
+        if (otPrompt == null) {
+          // User canceled; revert optimistic change to cached value
+          final cached = _statusCache.getIsClockedIn(_employeeGuid!);
+          if (cached != null && mounted) {
+            setState(() {
+              _clockedIn = cached;
+              _message = "Punch canceled.";
+            });
+          }
+          return;
+        }
 
-        await Future.delayed(const Duration(milliseconds: 75));
-        await _loadStatus(_employeeGuid!);
+        final otCode = otPrompt.trim();
+
+        // Validate only if provided
+        final ok = await _validateOtCodeIfProvided(otCode);
+        if (!ok) {
+          // revert optimistic state to cached value
+          final cached = _statusCache.getIsClockedIn(_employeeGuid!);
+          if (cached != null && mounted) {
+            setState(() => _clockedIn = cached);
+          }
+          return;
+        }
+
+        // Punch with (possibly empty) OT code
+        final s = await _api.punchAndGetStatus(
+          PunchRequest(
+            employeeId: _employeeGuid!,
+            punchType: punchType,
+            deviceType: deviceType,
+            deviceId: deviceId,
+            localSequenceNumber: seq,
+            timestampUtc: nowUtc,
+          ),
+          otCode: otCode,
+        );
+
+        if (!mounted) return;
+        setState(() {
+          _clockedIn = s.isClockedIn;
+          _message = s.isClockedIn ? "You are now IN." : "You are now OUT.";
+        });
+        await _statusCache.setIsClockedIn(_employeeGuid!, s.isClockedIn);
 
         Future.delayed(const Duration(seconds: 2), _resetSession);
       } else {
@@ -391,99 +492,22 @@ class _TabletScreenState extends State<TabletScreen> {
 
       Future.delayed(const Duration(seconds: 2), _resetSession);
     } finally {
-      // no returns in finally
       if (mounted) setState(() => _punching = false);
     }
   }
 
-  // ===== Step 4: Admin PIN Gate =====
-  Future<bool> _adminGate() async {
-    final pinCtrl = TextEditingController();
-    final pin2Ctrl = TextEditingController();
-
-    final alreadySet = await AdminPinService.isSet();
-
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(alreadySet ? "Admin PIN" : "Set Admin PIN"),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: pinCtrl,
-                  keyboardType: TextInputType.number,
-                  obscureText: true,
-                  decoration: InputDecoration(
-                    labelText: alreadySet ? "Enter PIN" : "New PIN",
-                  ),
-                ),
-                if (!alreadySet) ...[
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: pin2Ctrl,
-                    keyboardType: TextInputType.number,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: "Confirm PIN",
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text("Cancel"),
-            ),
-            TextButton(
-              onPressed: () async {
-                try {
-                  if (!alreadySet) {
-                    if (pinCtrl.text.trim() != pin2Ctrl.text.trim()) {
-                      // keep dialog open
-                      return;
-                    }
-                    await AdminPinService.setPin(pinCtrl.text.trim());
-                    if (!dialogContext.mounted) return;
-                    Navigator.of(dialogContext).pop(true);
-                    return;
-                  }
-
-                  final ok = await AdminPinService.verifyPin(pinCtrl.text.trim());
-                  if (!dialogContext.mounted) return;
-                  Navigator.of(dialogContext).pop(ok);
-                } catch (_) {
-                  if (!dialogContext.mounted) return;
-                  Navigator.of(dialogContext).pop(false);
-                }
-              },
-              child: const Text("OK"),
-            ),
-          ],
-        );
-      },
-    );
-
-    return result ?? false;
-  }
-
-  // ===== Step 5: Remote config sync stub =====
+  // ===== Remote config sync stub =====
   Future<void> _syncConfig() async {
     final changed = await RemoteConfigService.trySync();
     if (!mounted) return;
 
     setState(() {
-      _message = changed ? "Config updated." : "Config sync recorded (no backend yet).";
+      _message =
+      changed ? "Config updated." : "Config sync recorded (no backend yet).";
     });
   }
 
-  // ===== Admin: Service settings =====
+  // ===== Service settings (via 009876 only) =====
   Future<void> _showServiceSettingsDialog() async {
     final urlCtrl = TextEditingController(text: DeviceConfigService.baseUrl);
     final kioskCtrl = TextEditingController(text: DeviceConfigService.kioskId);
@@ -491,7 +515,7 @@ class _TabletScreenState extends State<TabletScreen> {
 
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) {
+      builder: (_) {
         return AlertDialog(
           title: const Text("Service Settings"),
           content: SizedBox(
@@ -530,19 +554,20 @@ class _TabletScreenState extends State<TabletScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
+              onPressed: () => Navigator.of(context).pop(),
               child: const Text("Cancel"),
             ),
             TextButton(
               onPressed: () async {
+                final nav = Navigator.of(context);
+
                 await DeviceConfigService.setBaseUrl(urlCtrl.text);
                 await DeviceConfigService.setKioskId(kioskCtrl.text);
                 await DeviceConfigService.setAuthToken(authCtrl.text);
 
-                if (mounted) setState(() => _message = "Service settings saved.");
-
-                if (!dialogContext.mounted) return;
-                Navigator.of(dialogContext).pop();
+                if (!mounted) return;
+                setState(() => _message = "Service settings saved.");
+                nav.pop();
               },
               child: const Text("Save"),
             ),
@@ -552,43 +577,125 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
-  // ===== Admin: Punch log =====
+  // ===== Punch log (via 101010 only) =====
   Future<void> _showPunchLogDialog() async {
     final box = Hive.box('punch_queue');
     final keys = box.keys.toList();
     final items = <Map<String, dynamic>>[];
 
-    for (final k in keys.reversed.take(50)) {
+    for (final k in keys.reversed.take(200)) {
       final v = box.get(k);
       if (v is Map) {
         items.add(v.map((key, value) => MapEntry(key.toString(), value)));
       }
     }
 
+    String buildCsv(List<Map<String, dynamic>> rows) {
+      final header = [
+        'kioskId',
+        'employeeId',
+        'punchType',
+        'localSequenceNumber',
+        'timestampUtc',
+        'queuedAtUtc',
+      ];
+
+      final lines = <String>[];
+      lines.add(header.join(','));
+
+      for (final m in rows) {
+        final kioskId = (m['kioskId'] ?? '').toString();
+        final emp = (m['employeeId'] ?? '').toString();
+        final type = (m['punchType'] ?? '').toString();
+        final seq = (m['localSequenceNumber'] ?? '').toString();
+
+        final tsUtc = _normalizeIsoNoMillis((m['timestampUtc'] ?? '').toString());
+        final queuedAt = _normalizeIsoNoMillis((m['queuedAtUtc'] ?? '').toString());
+
+        String q(String s) => '"${s.replaceAll('"', '""')}"';
+
+        lines.add([
+          q(kioskId),
+          q(emp),
+          q(type),
+          q(seq),
+          q(tsUtc),
+          q(queuedAt),
+        ].join(','));
+      }
+
+      return lines.join('\n');
+    }
+
+    String buildJson(List<Map<String, dynamic>> rows) {
+      final cleaned = rows.map((m) {
+        final copy = Map<String, dynamic>.from(m);
+
+        copy['timestampUtc'] =
+            _normalizeIsoNoMillis((copy['timestampUtc'] ?? '').toString());
+        copy['queuedAtUtc'] =
+            _normalizeIsoNoMillis((copy['queuedAtUtc'] ?? '').toString());
+
+        return copy;
+      }).toList();
+
+      return const JsonEncoder.withIndent('  ').convert(cleaned);
+    }
+
+    Future<void> copyToClipboard(String label, String text) async {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (!mounted) return;
+      setState(() => _message = "$label copied to clipboard.");
+    }
+
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) {
+      builder: (_) {
+        final csv = buildCsv(items);
+        final json = buildJson(items);
+
         return AlertDialog(
           title: const Text("Punch History (Offline Queue)"),
           content: SizedBox(
-            width: 760,
+            width: 860,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text("Pending punches: $_pendingCount"),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    ElevatedButton(
+                      onPressed: () => copyToClipboard("CSV export", csv),
+                      child: const Text("Copy CSV"),
+                    ),
+                    const SizedBox(width: 10),
+                    ElevatedButton(
+                      onPressed: () => copyToClipboard("JSON export", json),
+                      child: const Text("Copy JSON"),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      "(paste into email/notes for admins)",
+                      style: TextStyle(color: Colors.grey.shade700),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 12),
                 Flexible(
                   child: SingleChildScrollView(
                     child: Column(
                       children: items.map((m) {
+                        final kioskId = (m['kioskId'] ?? '').toString();
                         final emp = (m["employeeId"] ?? "").toString();
                         final type = (m["punchType"] ?? "").toString();
-                        final ts = (m["timestampUtc"] ?? "").toString();
+                        final ts = _normalizeIsoNoMillis((m["timestampUtc"] ?? "").toString());
                         final seq = (m["localSequenceNumber"] ?? "").toString();
+
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 6),
                           child: Text(
-                            "Emp: $emp | Type: $type | Seq: $seq | UTC: $ts",
+                            "Kiosk: $kioskId | Emp: $emp | Type: $type | Seq: $seq | UTC: $ts",
                             style: const TextStyle(fontSize: 12),
                           ),
                         );
@@ -601,13 +708,44 @@ class _TabletScreenState extends State<TabletScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
+              onPressed: () => Navigator.of(context).pop(),
               child: const Text("Close"),
             ),
           ],
         );
       },
     );
+  }
+
+  // ===== Timestamp helpers (NO milliseconds) =====
+
+  /// ISO 8601 UTC with seconds only: YYYY-MM-DDTHH:mm:ssZ
+  String _isoUtcNoMillis(DateTime utc) {
+    final u = utc.toUtc();
+    final yyyy = u.year.toString().padLeft(4, '0');
+    final mm = u.month.toString().padLeft(2, '0');
+    final dd = u.day.toString().padLeft(2, '0');
+    final hh = u.hour.toString().padLeft(2, '0');
+    final min = u.minute.toString().padLeft(2, '0');
+    final ss = u.second.toString().padLeft(2, '0');
+    return '$yyyy-$mm-$dd'
+        'T$hh:$min:$ss'
+        'Z';
+  }
+
+  /// If an ISO string includes fractional seconds, strip them for display/export.
+  /// Example: 2026-03-03T10:11:12.345Z -> 2026-03-03T10:11:12Z
+  String _normalizeIsoNoMillis(String s) {
+    final t = s.trim();
+    if (t.isEmpty) return t;
+
+    final dot = t.indexOf('.');
+    if (dot == -1) return t;
+
+    final before = t.substring(0, dot);
+    final hasZ = t.toUpperCase().endsWith('Z');
+
+    return hasZ ? '${before}Z' : before;
   }
 
   // ===== UI =====
@@ -709,7 +847,7 @@ class _TabletScreenState extends State<TabletScreen> {
                     ),
                   ),
 
-                  // Top-right: Sync + Config Sync
+                  // Top-right: Sync + Config Sync (regular buttons; NOT admin-gated)
                   Positioned(
                     right: s(24),
                     top: s(10),
@@ -744,6 +882,7 @@ class _TabletScreenState extends State<TabletScreen> {
                     ),
                   ),
 
+                  // Bottom-right version label (NOT clickable)
                   Positioned(
                     right: s(24),
                     bottom: s(8),
@@ -771,7 +910,10 @@ class _TabletScreenState extends State<TabletScreen> {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(s(22)),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.15), width: s(2)),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.15),
+          width: s(2),
+        ),
       ),
       child: Column(
         children: [
@@ -864,7 +1006,10 @@ class _TabletScreenState extends State<TabletScreen> {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(s(22)),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.15), width: s(2)),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.15),
+          width: s(2),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
