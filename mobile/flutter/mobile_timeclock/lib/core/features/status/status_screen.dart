@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../api_client.dart';
+import '../../Services/device_config_service.dart';
+
 import '../../../data/remote/timeclock_api.dart';
 import '../../../data/models/punch.dart';
 import '../../../data/models/sync.dart';
@@ -29,7 +31,6 @@ class _StatusScreenState extends State<StatusScreen> {
   String? _rawStatus;
 
   static const int deviceType = 1;
-  static const String deviceId = "KIOSK-TEST-01";
 
   final _queue = PunchQueue();
   final _connectivity = Connectivity();
@@ -37,6 +38,8 @@ class _StatusScreenState extends State<StatusScreen> {
   final _statusCache = StatusCache();
 
   int _pendingCount = 0;
+
+  String get _deviceId => DeviceConfigService.deviceId;
 
   @override
   void initState() {
@@ -141,6 +144,11 @@ class _StatusScreenState extends State<StatusScreen> {
     setState(() => _pendingCount = c);
   }
 
+  String _statusLabelFromPunchType(int punchType) {
+    // punchType is local UX: 0=IN, 1=OUT
+    return punchType == 0 ? "IN" : "OUT";
+  }
+
   Future<void> _doPunch() async {
     setState(() {
       _msg = null;
@@ -151,13 +159,21 @@ class _StatusScreenState extends State<StatusScreen> {
     final int seq = _seqStore.next();
     final nowUtc = DateTime.now().toUtc();
 
+    final displayName = (_employeeName == null || _employeeName!.trim().isEmpty)
+        ? null
+        : _employeeName!.trim();
+
+    // ✅ Queue payload now includes enough info for your punch log UI
     final payload = <String, dynamic>{
       'employeeId': widget.employeeGuid,
+      'employeeName': displayName, // helpful for logs when offline
       'punchType': punchType,
+      'status': _statusLabelFromPunchType(punchType), // "IN"/"OUT"
       'localSequenceNumber': seq,
       'timestampUtc': nowUtc.toIso8601String(),
-      'latitude': null,
+      'latitude': null, // warn-only geo plan for now
       'longitude': null,
+      'deviceId': _deviceId,
     };
 
     try {
@@ -179,18 +195,21 @@ class _StatusScreenState extends State<StatusScreen> {
       await _applyStatusAndCache(
         isClockedIn: optimisticClockedIn,
         rawStatus: optimisticClockedIn ? "IN" : "OUT",
+        fullName: displayName,
       );
 
       if (online) {
-        // Server-truth punch: CollectPunches then GetStatus and return final status
-        final s = await _api.punchAndGetStatus(PunchRequest(
-          employeeId: widget.employeeGuid,
-          punchType: punchType,
-          deviceType: deviceType,
-          deviceId: deviceId,
-          localSequenceNumber: seq,
-          timestampUtc: nowUtc,
-        ));
+        // Server-truth punch: CollectPunches then GetStatus
+        final s = await _api.punchAndGetStatus(
+          PunchRequest(
+            employeeId: widget.employeeGuid,
+            punchType: punchType,
+            deviceType: deviceType,
+            deviceId: _deviceId,
+            localSequenceNumber: seq,
+            timestampUtc: nowUtc,
+          ),
+        );
 
         if (!mounted) return;
 
@@ -211,9 +230,7 @@ class _StatusScreenState extends State<StatusScreen> {
       try {
         await _queue.enqueue(payload);
         await _refreshPending();
-      } catch (_) {
-        // ignore queue failure; show original error
-      }
+      } catch (_) {}
 
       if (mounted) {
         setState(() => _msg = "Punch failed; queued if possible. Error: $e");
@@ -241,7 +258,8 @@ class _StatusScreenState extends State<StatusScreen> {
       final punches = pending.map((p) {
         final punchType = (p["punchType"] as num?)?.toInt() ?? 0;
         final localSeq = (p["localSequenceNumber"] as num?)?.toInt() ?? 0;
-        final ts = p["timestampUtc"] as String? ??
+
+        final ts = (p["timestampUtc"] as String?) ??
             DateTime.now().toUtc().toIso8601String();
 
         return SyncPunch(
@@ -255,16 +273,14 @@ class _StatusScreenState extends State<StatusScreen> {
       }).toList();
 
       final batch = SyncPunchBatch(
-        deviceId: deviceId,
+        deviceId: _deviceId,
         deviceType: deviceType,
         punches: punches,
       );
 
       final result = await _api.syncBatch(batch);
 
-      // Remove only punches confirmed sent successfully
       await _queue.removeByLocalSeq(result.acceptedSeq.toSet());
-
       await _refreshPending();
       await _load();
 
@@ -310,6 +326,8 @@ class _StatusScreenState extends State<StatusScreen> {
             Text("Employee: $displayName"),
             const SizedBox(height: 8),
             Text("Server Status: $displayRaw"),
+            const SizedBox(height: 8),
+            Text("Device ID: $_deviceId"),
             const SizedBox(height: 12),
             Text("Pending offline punches: $_pendingCount"),
             Row(

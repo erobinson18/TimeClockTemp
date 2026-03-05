@@ -24,6 +24,9 @@ dependencies:
   flutter_secure_storage: ^9.2.2
   crypto: ^3.0.3
 
+  # GPS
+  geolocator: ^11.0.0
+
   cupertino_icons: ^1.0.8
 
 dev_dependencies:

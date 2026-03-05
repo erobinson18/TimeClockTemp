@@ -1,9 +1,12 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 /// Central place for backend settings.
+/// IMPORTANT:
+/// - Web may require a proxy (CORS)
+/// - Mobile should use DeviceConfigService (Hive) for BaseUrl/Auth/DeviceId
 class AppConfig {
-  // ASMX endpoint
-  static const String asmxBaseUrl = "https://tcws.tsg.bz/tsgtc.asmx";
+  // Default ASMX endpoint (fallback only)
+  static const String defaultAsmxBaseUrl = "https://tcws.tsg.bz/tsgtc.asmx";
 
   // Web needs a proxy if CORS is not enabled on ASMX.
   // Example: https://your-proxy.azurewebsites.net
@@ -12,19 +15,17 @@ class AppConfig {
   // If ASMX supports CORS, you can set this false.
   static const bool useProxyOnWeb = true;
 
-  // Your bosses will provide this value.
-  static const String authToken = "REPLACE_WITH_REAL_AUTH";
+  // Only used by web builds if you decide not to store auth in web storage yet.
+  // Prefer injecting at build time or using a secure web config later.
+  static const String webAuthToken = "";
 
   // Only used if your system requires it.
-  static const String otCode = "";
-
-  // Used for MACAddress parameter; we pass a stable kiosk identifier.
-  static const String kioskId = "KIOSK-TEST-01";
+  static const String defaultOtCode = "";
 
   static const Duration timeout = Duration(seconds: 12);
 
   static String get effectiveBaseUrl {
     if (kIsWeb && useProxyOnWeb) return webProxyBaseUrl;
-    return asmxBaseUrl;
+    return defaultAsmxBaseUrl;
   }
 }

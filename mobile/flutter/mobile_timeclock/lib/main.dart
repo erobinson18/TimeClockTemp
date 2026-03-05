@@ -26,6 +26,9 @@ Future<void> main() async {
   await Hive.openBox('roster_cache', encryptionCipher: SecureHive.cipher);
   await Hive.openBox('status_cache', encryptionCipher: SecureHive.cipher);
 
+  // encrypt punch_log too (employee + gps data)
+  await Hive.openBox('punch_log', encryptionCipher: SecureHive.cipher);
+
   await SystemChrome.setPreferredOrientations(const [
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,

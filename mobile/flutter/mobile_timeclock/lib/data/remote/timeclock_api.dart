@@ -14,14 +14,15 @@ class TimeClockApi {
   final ApiClient _client;
   TimeClockApi(this._client);
 
-  String get _base => DeviceConfigService.baseUrl; // ex: https://tcws.tsg.bz/tsgtc.asmx
+  String get _base => DeviceConfigService.baseUrl; // ex: https://.../tsgtc.asmx
   String get _auth => DeviceConfigService.authToken;
-  String get _kioskId => DeviceConfigService.kioskId;
+
+  // was kioskId, now deviceId (but kioskId alias exists too)
+  String get _deviceId => DeviceConfigService.deviceId;
 
   String _ep(String method) => '$_base/$method';
 
   Future<void> ping() async {
-    // cheap, reliable call to prove the server is reachable
     await getEmpsRaw();
   }
 
@@ -39,7 +40,6 @@ class TimeClockApi {
   }
 
   List<EmployeeDirectoryItem> _parseGetEmps(String raw) {
-    // Raw sample: "1000;Name;100060;LAST, FIRST;..."
     final parts = raw
         .split(';')
         .map((s) => s.trim())
@@ -54,7 +54,7 @@ class TimeClockApi {
       if (empNum.isEmpty || name.isEmpty) continue;
 
       out.add(EmployeeDirectoryItem(
-        employeeId: empNum, // TEMP until real GUID exists
+        employeeId: empNum,
         employeeNumber: empNum,
         fullName: name,
       ));
@@ -97,7 +97,7 @@ class TimeClockApi {
       employeeId: e.employeeId,
       employeeNumber: e.employeeNumber,
       fullName: e.fullName,
-      isClockedIn: false, // UI/cache will correct after calling status()
+      isClockedIn: false,
     );
   }
 
@@ -121,14 +121,14 @@ class TimeClockApi {
     return _extractStringValue(xml);
   }
 
-  Future<StatusResponse> status(String empId) async {
+  Future<StatusResponse> status(String empId, {String otCode = ''}) async {
     final nowLocal = DateTime.now();
 
     final raw = await getStatusRaw(
       empId: empId,
-      macAddress: _kioskId,
-      currTime: _isoLocalNoMillis(nowLocal), // ✅ no milliseconds
-      otCode: '',
+      macAddress: _deviceId, // use deviceId
+      currTime: _isoLocalNoMillis(nowLocal),
+      otCode: otCode,
     );
 
     final parsed = _parseGetStatus(raw);
@@ -146,7 +146,6 @@ class TimeClockApi {
       return const _ParsedStatus(isClockedIn: false, fullName: null, rawStatus: null);
     }
 
-    // Primary: NAME;IN|OUT
     if (trimmed.contains(';')) {
       final parts = trimmed.split(';');
       final namePart = parts.isNotEmpty ? parts[0].trim() : '';
@@ -164,7 +163,6 @@ class TimeClockApi {
         );
       }
 
-      // Weird after ';' => fall back but keep name
       final generic = _genericStatusDetect(trimmed);
       return _ParsedStatus(
         isClockedIn: generic.isClockedIn,
@@ -214,10 +212,11 @@ class TimeClockApi {
 
   Future<void> punch(PunchRequest req, {String otCode = ''}) async {
     final punchTime = _isoUtcNoMillis(req.timestampUtc.toUtc());
+
     await collectPunchesRaw(
       empId: req.employeeId,
       punchTime: punchTime,
-      macAddress: _kioskId,
+      macAddress: _deviceId, // use deviceId
       otCode: otCode,
     );
   }
@@ -225,7 +224,7 @@ class TimeClockApi {
   Future<StatusResponse> punchAndGetStatus(PunchRequest req, {String otCode = ''}) async {
     await punch(req, otCode: otCode);
     await Future.delayed(const Duration(milliseconds: 150));
-    return status(req.employeeId);
+    return status(req.employeeId, otCode: otCode);
   }
 
   // =====================
@@ -242,15 +241,13 @@ class TimeClockApi {
         await collectPunchesRaw(
           empId: p.employeeId,
           punchTime: punchTime,
-          macAddress: _kioskId,
+          macAddress: _deviceId, // use deviceId
           otCode: otCode,
         );
 
         accepted.add(p.localSequenceNumber);
         processed++;
-      } catch (_) {
-        // keep going
-      }
+      } catch (_) {}
     }
 
     return SyncResult(processed: processed, acceptedSeq: accepted);
@@ -272,9 +269,6 @@ class TimeClockApi {
     return _extractStringValue(xml);
   }
 
-  /// Accepts:
-  /// - "true" / "false" (your example shows false)
-  /// - "Success" (some environments)
   Future<ValidateCodeResponse> validateCode({
     required String otCode,
     required String action,
@@ -284,17 +278,18 @@ class TimeClockApi {
       action: action,
     );
 
-    final t = raw.trim().toLowerCase();
-    final ok = (t == 'true' || t == 'success' || t == '1' || t == 'ok');
+    final v = raw.trim().toLowerCase();
+    final ok = (v == 'success' || v == 'true' || v == '1');
 
-    return ValidateCodeResponse(ok: ok, rawMessage: raw.trim());
+    return ValidateCodeResponse(
+      ok: ok,
+      rawMessage: raw.trim(),
+    );
   }
 
   // =====================
   // Helpers
   // =====================
-
-  /// ISO 8601 *LOCAL* time without milliseconds: YYYY-MM-DDTHH:mm:ss
   String _isoLocalNoMillis(DateTime local) {
     final dt = local;
     final yyyy = dt.year.toString().padLeft(4, '0');
@@ -307,7 +302,6 @@ class TimeClockApi {
         'T$hh:$min:$ss';
   }
 
-  /// ISO 8601 UTC without milliseconds: YYYY-MM-DDTHH:mm:ssZ
   String _isoUtcNoMillis(DateTime utc) {
     final dt = utc.toUtc();
     final yyyy = dt.year.toString().padLeft(4, '0');
@@ -321,9 +315,6 @@ class TimeClockApi {
         'Z';
   }
 
-  // =====================
-  // SOAP <string> parser
-  // =====================
   String _extractStringValue(String xmlText) {
     final doc = XmlDocument.parse(xmlText);
 

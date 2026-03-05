@@ -4,13 +4,13 @@ class DeviceConfigService {
   static const String boxName = 'device';
 
   static const String _kBaseUrlKey = 'baseUrl';
-  static const String _kKioskIdKey = 'kioskId';
   static const String _kAuthTokenKey = 'authToken';
+  static const String _kDeviceIdKey = 'deviceId';
 
-  // Defaults (used if box is empty)
+  // Defaults
   static const String defaultBaseUrl = 'https://tcws.tsg.bz/tsgtc.asmx';
-  static const String defaultKioskId = 'tsg-unknown-android';
   static const String defaultAuthToken = '';
+  static const String defaultDeviceId = 'KIOSK-TEST-01';
 
   static Box get _box => Hive.box(boxName);
 
@@ -19,34 +19,35 @@ class DeviceConfigService {
     return v.isNotEmpty ? v : defaultBaseUrl;
   }
 
-  static String get kioskId {
-    final v = (_box.get(_kKioskIdKey) as String?)?.trim() ?? '';
-    return v.isNotEmpty ? v : defaultKioskId;
-  }
-
   static String get authToken {
     final v = (_box.get(_kAuthTokenKey) as String?)?.trim() ?? '';
     return v.isNotEmpty ? v : defaultAuthToken;
   }
 
-  static Future<void> setBaseUrl(String value) async {
-    await _box.put(_kBaseUrlKey, value.trim());
+  static String get deviceId {
+    final v = (_box.get(_kDeviceIdKey) as String?)?.trim() ?? '';
+    return v.isNotEmpty ? v : defaultDeviceId;
   }
 
-  static Future<void> setKioskId(String value) async {
-    await _box.put(_kKioskIdKey, value.trim());
+  static String get kioskId => deviceId;
+
+  static Future<void> setBaseUrl(String value) async {
+    await _box.put(_kBaseUrlKey, value.trim());
   }
 
   static Future<void> setAuthToken(String value) async {
     await _box.put(_kAuthTokenKey, value.trim());
   }
 
-  // Optional helpers
+  static Future<void> setDeviceId(String value) async {
+    await _box.put(_kDeviceIdKey, value.trim());
+  }
+
   static bool get hasAuthToken => authToken.trim().isNotEmpty;
 
   static Future<void> resetToDefaults() async {
     await _box.put(_kBaseUrlKey, defaultBaseUrl);
-    await _box.put(_kKioskIdKey, defaultKioskId);
     await _box.put(_kAuthTokenKey, defaultAuthToken);
+    await _box.put(_kDeviceIdKey, defaultDeviceId);
   }
 }

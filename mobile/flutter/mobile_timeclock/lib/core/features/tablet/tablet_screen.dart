@@ -1,10 +1,11 @@
+// lib/core/features/tablet/tablet_screen.dart
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../api_client.dart';
 import '../../Services/device_config_service.dart';
@@ -15,6 +16,7 @@ import '../../../data/local/local_seq_store.dart';
 import '../../../data/local/punch_queue.dart';
 import '../../../data/local/roster_cache.dart';
 import '../../../data/local/status_cache.dart';
+import '../../../data/local/punch_log_store.dart';
 
 import '../../../data/models/punch.dart';
 import '../../../data/models/status.dart';
@@ -36,6 +38,7 @@ class _TabletScreenState extends State<TabletScreen> {
   late final HeartbeatService _heartbeat;
 
   final _queue = PunchQueue();
+  final _log = PunchLogStore();
   final _rosterCache = RosterCache();
   final _statusCache = StatusCache();
   final _connectivity = Connectivity();
@@ -55,22 +58,41 @@ class _TabletScreenState extends State<TabletScreen> {
   String? _message;
   int _pendingCount = 0;
 
-  // Device identifiers (Vista mapping can remain server-side)
+  // Device identifiers (Vista mapping NOT used)
   static const int deviceType = 1;
-  static const String deviceId = "KIOSK-TEST-01";
+
+  // ✅ Meraki / deployment will set this in the device config box
+  String get _deviceId => DeviceConfigService.deviceId;
 
   Timer? _clockTimer;
   Timer? _syncTimer;
   DateTime _now = DateTime.now();
   DateTime? _lastSyncAttemptLocal;
 
-  // Special access codes (ONLY way to open these screens)
+  // Special access codes
   static const String _adminServiceCode = "009876";
   static const String _adminPunchLogCode = "101010";
 
   // Phase 4: ValidateCode "Action" parameter
-  // If your server expects a different action token, change it here:
   static const String _validateActionPunch = "PUNCH";
+
+  // ===== Server-down grace window (automatic failover) =====
+  static const Duration _serverDownGrace = Duration(minutes: 2);
+  DateTime? _serverDownUntilUtc;
+
+  bool get _serverInGraceWindow {
+    final until = _serverDownUntilUtc;
+    if (until == null) return false;
+    return DateTime.now().toUtc().isBefore(until);
+  }
+
+  void _markServerDown() {
+    _serverDownUntilUtc = DateTime.now().toUtc().add(_serverDownGrace);
+  }
+
+  void _clearServerDown() {
+    _serverDownUntilUtc = null;
+  }
 
   @override
   void initState() {
@@ -121,7 +143,8 @@ class _TabletScreenState extends State<TabletScreen> {
     HapticFeedback.selectionClick();
     setState(() {
       if (_employeeNumber.isEmpty) return;
-      _employeeNumber = _employeeNumber.substring(0, _employeeNumber.length - 1);
+      _employeeNumber =
+          _employeeNumber.substring(0, _employeeNumber.length - 1);
     });
   }
 
@@ -146,18 +169,27 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   // ===== Connectivity =====
-  Future<bool> _isOnline() async {
+  Future<bool> _isOnline({bool force = false}) async {
+    // If we recently detected server trouble, act offline for a short window
+    // to avoid repeated pings / slow UX. "force" bypasses this (manual sync).
+    if (!force && _serverInGraceWindow) return false;
+
     final results = await _connectivity.checkConnectivity();
-    if (results.contains(ConnectivityResult.none)) {
-      return false;
-    }
+    if (results.contains(ConnectivityResult.none)) return false;
 
     try {
       await _api.ping();
+      _clearServerDown();
       return true;
     } catch (_) {
+      _markServerDown();
       return false;
     }
+  }
+
+  Future<bool> _hasNetworkLink() async {
+    final results = await _connectivity.checkConnectivity();
+    return !results.contains(ConnectivityResult.none);
   }
 
   // ===== Step 1: Warm roster cache from GetEmps =====
@@ -178,11 +210,17 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   // ===== Sync =====
-  Future<void> _trySync() async {
+  Future<void> _trySync({bool forceOnline = false}) async {
     try {
       _lastSyncAttemptLocal = DateTime.now();
 
-      if (!await _isOnline()) return;
+      if (!await _isOnline(force: forceOnline)) {
+        if (forceOnline && mounted) {
+          setState(() => _message =
+          "Offline: cannot sync right now. (${_serverInGraceWindow ? "Server grace window" : "No connection"})");
+        }
+        return;
+      }
 
       final pending = await _queue.allVerified();
       if (pending.isEmpty) return;
@@ -205,7 +243,7 @@ class _TabletScreenState extends State<TabletScreen> {
       }).toList();
 
       final batch = SyncPunchBatch(
-        deviceId: deviceId,
+        deviceId: _deviceId,
         deviceType: deviceType,
         punches: punches,
       );
@@ -221,7 +259,9 @@ class _TabletScreenState extends State<TabletScreen> {
       if (_employeeGuid != null && _employeeGuid!.trim().isNotEmpty) {
         await _loadStatus(_employeeGuid!);
       }
-    } catch (_) {}
+    } catch (_) {
+      _markServerDown();
+    }
   }
 
   // ===== Verify =====
@@ -244,7 +284,7 @@ class _TabletScreenState extends State<TabletScreen> {
       return;
     }
 
-    // ✅ SPECIAL CODES MUST ALWAYS WIN (ONLINE/OFFLINE DOESN'T MATTER)
+    // ✅ Admin screens MUST be accessible offline/online
     if (entry == _adminServiceCode) {
       _clearEntry();
       await _showServiceSettingsDialog();
@@ -290,7 +330,6 @@ class _TabletScreenState extends State<TabletScreen> {
 
       await _statusCache.setIsClockedIn(cached.employeeId, cachedClockedIn);
 
-      // If online, trust server status to correct cached bool
       if (online) {
         await _loadStatus(cached.employeeId);
       }
@@ -316,61 +355,80 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-  // ===== Phase 4 helper: prompt + validate OTCode (online only) =====
-  Future<String?> _promptForOtCodeIfNeeded() async {
-    // Only prompt when online (offline must still work)
-    final online = await _isOnline();
-    if (!online) return null;
+  // ===== Location (warn-only) =====
+  Future<Position?> _getBestEffortPosition() async {
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return null;
 
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return null;
+      }
+
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 3),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ===== Phase 4 helper: prompt + validate OTCode (ONLINE ONLY) =====
+  Future<String?> _promptForOtCodeOnline() async {
     final ctrl = TextEditingController();
 
-    final res = await showDialog<String?>(
-      context: context,
-      barrierDismissible: true,
-      builder: (_) {
-        return AlertDialog(
-          title: const Text("Optional Site / OT Code"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                "If your company requires a site/OT code for this punch, enter it now.\n\n"
-                    "Leave blank to punch normally.",
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: ctrl,
-                decoration: const InputDecoration(
-                  labelText: "OT Code (optional)",
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.text,
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => Navigator.of(context).pop(ctrl.text.trim()),
-              ),
-            ],
+    return _showAppDialog<String?>(
+      title: "Optional Site / OT Code",
+      width: 560,
+      dismissible: true,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            "If your company requires a site/OT code for this punch, enter it now.\n\n"
+                "Leave blank to punch normally.",
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.85),
+              fontWeight: FontWeight.w600,
+              height: 1.25,
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(null),
-              child: const Text("Cancel"),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(ctrl.text.trim()),
-              child: const Text("Continue"),
-            ),
-          ],
-        );
-      },
+          const SizedBox(height: 12),
+          _darkTextField(
+            controller: ctrl,
+            label: "OT Code (optional)",
+            hint: "",
+            inputType: TextInputType.text,
+            onSubmitted: (_) => Navigator.of(context).pop(ctrl.text.trim()),
+          ),
+        ],
+      ),
+      actions: [
+        _dialogButton(
+          label: "Cancel",
+          filled: false,
+          onTap: () => Navigator.of(context).pop(null),
+        ),
+        _dialogButton(
+          label: "Continue",
+          filled: true,
+          onTap: () => Navigator.of(context).pop(ctrl.text.trim()),
+        ),
+      ],
     );
-
-    // null = user canceled dialog
-    return res;
   }
 
   Future<bool> _validateOtCodeIfProvided(String otCode) async {
     final code = otCode.trim();
-    if (code.isEmpty) return true; // nothing to validate
+    if (code.isEmpty) return true;
 
     final result = await _api.validateCode(
       otCode: code,
@@ -384,6 +442,30 @@ class _TabletScreenState extends State<TabletScreen> {
     }
 
     return true;
+  }
+
+  Future<void> _writePunchLog({
+    required String employeeId,
+    required String employeeName,
+    required int punchType,
+    required int localSeq,
+    required String timestampUtc,
+    required double? lat,
+    required double? lng,
+    required String outcome, // ONLINE_OK / OFFLINE_QUEUED / ERROR_QUEUED / CANCELED / BLOCKED
+  }) async {
+    await _log.add({
+      "timestampUtc": timestampUtc,
+      "employeeId": employeeId,
+      "employeeName": employeeName,
+      "punchType": punchType,
+      "status": (punchType == 0) ? "IN" : "OUT",
+      "localSequenceNumber": localSeq,
+      "latitude": lat,
+      "longitude": lng,
+      "outcome": outcome,
+      "deviceId": _deviceId,
+    });
   }
 
   // ===== Punch =====
@@ -401,94 +483,163 @@ class _TabletScreenState extends State<TabletScreen> {
     final punchType = _clockedIn ? 1 : 0;
     final seq = _seqStore.next();
 
-    // IMPORTANT: queue timestamp MUST NOT have milliseconds.
     final nowUtc = DateTime.now().toUtc();
     final tsUtcNoMillis = _isoUtcNoMillis(nowUtc);
+
+    // Best-effort GPS (warn-only)
+    final pos = await _getBestEffortPosition();
+    final lat = pos?.latitude;
+    final lng = pos?.longitude;
 
     final queuedPayload = <String, dynamic>{
       "employeeId": _employeeGuid!,
       "punchType": punchType,
       "localSequenceNumber": seq,
-      "timestampUtc": tsUtcNoMillis, // ✅ no milliseconds
-      "latitude": null,
-      "longitude": null,
+      "timestampUtc": tsUtcNoMillis,
+      "latitude": lat,
+      "longitude": lng,
     };
 
     // optimistic UX
+    final prevClockedIn = _clockedIn;
     final newClockedIn = (punchType == 0);
+
     setState(() {
       _clockedIn = newClockedIn;
       _message = (punchType == 0) ? "Clock In recorded." : "Clock Out recorded.";
     });
     await _statusCache.setIsClockedIn(_employeeGuid!, newClockedIn);
 
+    Future<void> revertOptimistic(String msg) async {
+      if (!mounted) return;
+      setState(() {
+        _clockedIn = prevClockedIn;
+        _message = msg;
+      });
+      await _statusCache.setIsClockedIn(_employeeGuid!, prevClockedIn);
+    }
+
+    // Always log what the tablet is doing (your requirement)
+    final nameForLog =
+    (_fullName ?? "").trim().isEmpty ? "(unknown)" : _fullName!.trim();
+
     try {
       final online = await _isOnline();
 
-      if (online) {
-        // Phase 4: prompt for optional code and validate before punching
-        final otPrompt = await _promptForOtCodeIfNeeded();
-        if (otPrompt == null) {
-          // User canceled; revert optimistic change to cached value
-          final cached = _statusCache.getIsClockedIn(_employeeGuid!);
-          if (cached != null && mounted) {
-            setState(() {
-              _clockedIn = cached;
-              _message = "Punch canceled.";
-            });
-          }
-          return;
-        }
+      if (!online) {
+        await _queue.enqueue(queuedPayload);
+        await _refreshPending();
 
-        final otCode = otPrompt.trim();
-
-        // Validate only if provided
-        final ok = await _validateOtCodeIfProvided(otCode);
-        if (!ok) {
-          // revert optimistic state to cached value
-          final cached = _statusCache.getIsClockedIn(_employeeGuid!);
-          if (cached != null && mounted) {
-            setState(() => _clockedIn = cached);
-          }
-          return;
-        }
-
-        // Punch with (possibly empty) OT code
-        final s = await _api.punchAndGetStatus(
-          PunchRequest(
-            employeeId: _employeeGuid!,
-            punchType: punchType,
-            deviceType: deviceType,
-            deviceId: deviceId,
-            localSequenceNumber: seq,
-            timestampUtc: nowUtc,
-          ),
-          otCode: otCode,
+        await _writePunchLog(
+          employeeId: _employeeGuid!,
+          employeeName: nameForLog,
+          punchType: punchType,
+          localSeq: seq,
+          timestampUtc: tsUtcNoMillis,
+          lat: lat,
+          lng: lng,
+          outcome: "OFFLINE_QUEUED",
         );
 
         if (!mounted) return;
         setState(() {
-          _clockedIn = s.isClockedIn;
-          _message = s.isClockedIn ? "You are now IN." : "You are now OUT.";
+          _message = "Offline: Punch queued ($_pendingCount pending)."
+              "${pos == null ? " (Location unavailable)" : ""}"
+              "${_serverInGraceWindow ? " (Server unreachable)" : ""}";
         });
-        await _statusCache.setIsClockedIn(_employeeGuid!, s.isClockedIn);
 
         Future.delayed(const Duration(seconds: 2), _resetSession);
-      } else {
-        await _queue.enqueue(queuedPayload);
-        await _refreshPending();
-
-        if (!mounted) return;
-        setState(() => _message = "Offline: Punch queued ($_pendingCount pending).");
-
-        Future.delayed(const Duration(seconds: 2), _resetSession);
+        return;
       }
+
+      // Online: prompt OT code
+      final otPrompt = await _promptForOtCodeOnline();
+
+      if (otPrompt == null) {
+        await _writePunchLog(
+          employeeId: _employeeGuid!,
+          employeeName: nameForLog,
+          punchType: punchType,
+          localSeq: seq,
+          timestampUtc: tsUtcNoMillis,
+          lat: lat,
+          lng: lng,
+          outcome: "CANCELED",
+        );
+        await revertOptimistic("Punch canceled.");
+        return;
+      }
+
+      final otCode = otPrompt.trim();
+
+      final ok = await _validateOtCodeIfProvided(otCode);
+      if (!ok) {
+        await _writePunchLog(
+          employeeId: _employeeGuid!,
+          employeeName: nameForLog,
+          punchType: punchType,
+          localSeq: seq,
+          timestampUtc: tsUtcNoMillis,
+          lat: lat,
+          lng: lng,
+          outcome: "BLOCKED",
+        );
+        await revertOptimistic("Punch blocked (invalid code).");
+        return;
+      }
+
+      final s = await _api.punchAndGetStatus(
+        PunchRequest(
+          employeeId: _employeeGuid!,
+          punchType: punchType,
+          deviceType: deviceType,
+          deviceId: _deviceId,
+          localSequenceNumber: seq,
+          timestampUtc: nowUtc,
+        ),
+        otCode: otCode,
+      );
+
+      await _writePunchLog(
+        employeeId: _employeeGuid!,
+        employeeName: nameForLog,
+        punchType: punchType,
+        localSeq: seq,
+        timestampUtc: tsUtcNoMillis,
+        lat: lat,
+        lng: lng,
+        outcome: "ONLINE_OK",
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _clockedIn = s.isClockedIn;
+        _message = s.isClockedIn ? "You are now IN." : "You are now OUT.";
+      });
+      await _statusCache.setIsClockedIn(_employeeGuid!, s.isClockedIn);
+
+      Future.delayed(const Duration(seconds: 2), _resetSession);
     } catch (_) {
+      // Automatic failover: mark server down + queue immediately
+      _markServerDown();
+
       await _queue.enqueue(queuedPayload);
       await _refreshPending();
 
+      await _writePunchLog(
+        employeeId: _employeeGuid!,
+        employeeName: nameForLog,
+        punchType: punchType,
+        localSeq: seq,
+        timestampUtc: tsUtcNoMillis,
+        lat: lat,
+        lng: lng,
+        outcome: "ERROR_QUEUED",
+      );
+
       if (!mounted) return;
-      setState(() => _message = "Punch queued ($_pendingCount pending).");
+      setState(() => _message =
+      "Server unreachable: Punch queued ($_pendingCount pending).");
 
       Future.delayed(const Duration(seconds: 2), _resetSession);
     } finally {
@@ -502,125 +653,416 @@ class _TabletScreenState extends State<TabletScreen> {
     if (!mounted) return;
 
     setState(() {
-      _message =
-      changed ? "Config updated." : "Config sync recorded (no backend yet).";
+      _message = changed ? "Config updated." : "Config sync recorded (no backend yet).";
     });
   }
 
-  // ===== Service settings (via 009876 only) =====
-  Future<void> _showServiceSettingsDialog() async {
-    final urlCtrl = TextEditingController(text: DeviceConfigService.baseUrl);
-    final kioskCtrl = TextEditingController(text: DeviceConfigService.kioskId);
-    final authCtrl = TextEditingController(text: DeviceConfigService.authToken);
+  // ===== Verify & Save helpers for 009876 =====
+  String _extractSoapStringValue(String xmlText) {
+    final m = RegExp(r'<string[^>]*>(.*?)</string>', dotAll: true)
+        .firstMatch(xmlText);
+    if (m == null) return '';
+    final inner = m.group(1) ?? '';
+    return inner
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .trim();
+  }
 
-    await showDialog<void>(
+  Future<({bool ok, String message})> _testServiceSettings({
+    required String baseUrl,
+    required String authToken,
+  }) async {
+    final url = baseUrl.trim();
+    final auth = authToken.trim();
+
+    if (url.isEmpty) return (ok: false, message: "Base URL is required.");
+    if (auth.isEmpty) return (ok: false, message: "Auth token is required.");
+
+    if (!await _hasNetworkLink()) {
+      return (ok: true, message: "Saved offline. Will verify when online.");
+    }
+
+    try {
+      final client = ApiClient(log: (m) => debugPrint(m));
+      final xml = await client.postForm('$url/GetEmps', {'Auth': auth});
+      final value = _extractSoapStringValue(xml);
+
+      if (value.trim().isEmpty) {
+        return (ok: false,
+        message: "Server responded, but returned an empty value.");
+      }
+
+      final looksLikeHtml = value.toLowerCase().contains('<html') ||
+          xml.toLowerCase().contains('<html');
+      if (looksLikeHtml) {
+        return (
+        ok: false,
+        message:
+        "Endpoint looks wrong (HTML response). Check the .asmx path."
+        );
+      }
+
+      return (ok: true, message: "Verified and saved.");
+    } catch (e) {
+      return (ok: false, message: "Verify failed: $e");
+    }
+  }
+
+  // ===== Clean dialog framework (fade+scale transition) =====
+  Future<T?> _showAppDialog<T>({
+    required String title,
+    required Widget content,
+    required List<Widget> actions,
+    double width = 680,
+    bool dismissible = true,
+  }) async {
+    return showGeneralDialog<T>(
       context: context,
-      builder: (_) {
-        return AlertDialog(
-          title: const Text("Service Settings"),
-          content: SizedBox(
-            width: 560,
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  TextField(
-                    controller: urlCtrl,
-                    decoration: const InputDecoration(
-                      labelText: "Service Base URL",
-                      hintText: "https://tcws.tsg.bz/tsgtc.asmx",
+      barrierDismissible: dismissible,
+      barrierLabel: "dialog",
+      barrierColor: Colors.black.withValues(alpha: 0.65),
+      transitionDuration: const Duration(milliseconds: 180),
+      pageBuilder: (ctx, a1, a2) {
+        final w = MediaQuery.of(ctx).size.width;
+        final maxW = width.clamp(320.0, w - 40.0).toDouble();
+
+        return SafeArea(
+          child: Center(
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                width: maxW,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF111111),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.14),
+                    width: 2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      blurRadius: 24,
+                      spreadRadius: 2,
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: kioskCtrl,
-                    decoration: const InputDecoration(
-                      labelText: "Kiosk ID (MACAddress)",
-                      hintText: "tsg-eld-android",
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.of(ctx).pop(),
+                          icon: Icon(
+                            Icons.close,
+                            color: Colors.white.withValues(alpha: 0.85),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: authCtrl,
-                    decoration: const InputDecoration(labelText: "Auth Token"),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    "Format suggestion: tsg-<locationcode>-<platform>",
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ],
+                    const SizedBox(height: 10),
+                    Flexible(child: content),
+                    const SizedBox(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: actions
+                          .map((w) => Padding(
+                        padding: const EdgeInsets.only(left: 10),
+                        child: w,
+                      ))
+                          .toList(),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text("Cancel"),
-            ),
-            TextButton(
-              onPressed: () async {
-                final nav = Navigator.of(context);
-
-                await DeviceConfigService.setBaseUrl(urlCtrl.text);
-                await DeviceConfigService.setKioskId(kioskCtrl.text);
-                await DeviceConfigService.setAuthToken(authCtrl.text);
-
-                if (!mounted) return;
-                setState(() => _message = "Service settings saved.");
-                nav.pop();
-              },
-              child: const Text("Save"),
-            ),
-          ],
+        );
+      },
+      transitionBuilder: (ctx, anim, sec, child) {
+        final curve =
+        CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
+        return FadeTransition(
+          opacity: curve,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.98, end: 1.0).animate(curve),
+            child: child,
+          ),
         );
       },
     );
   }
 
+  static Widget _dialogButton({
+    required String label,
+    required VoidCallback? onTap,
+    required bool filled,
+    bool busy = false,
+  }) {
+    return SizedBox(
+      height: 44,
+      child: ElevatedButton(
+        onPressed: busy ? null : onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor:
+          filled ? Colors.white : Colors.white.withValues(alpha: 0.10),
+          foregroundColor: filled ? Colors.black : Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(
+              color: Colors.white.withValues(alpha: filled ? 0.00 : 0.18),
+              width: 2,
+            ),
+          ),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.5,
+          ),
+        ),
+      ),
+    );
+  }
+
+  static Widget _darkTextField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    TextInputType inputType = TextInputType.text,
+    void Function(String)? onSubmitted,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: inputType,
+      textInputAction: TextInputAction.done,
+      onSubmitted: onSubmitted,
+      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        labelStyle: TextStyle(color: Colors.white.withValues(alpha: 0.75)),
+        hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.35)),
+        filled: true,
+        fillColor: Colors.white.withValues(alpha: 0.07),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide:
+          BorderSide(color: Colors.white.withValues(alpha: 0.16), width: 2),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide:
+          BorderSide(color: Colors.white.withValues(alpha: 0.30), width: 2),
+        ),
+      ),
+    );
+  }
+
+  // ===== Service settings (via 009876 only) =====
+  Future<void> _showServiceSettingsDialog() async {
+    final urlCtrl = TextEditingController(text: DeviceConfigService.baseUrl);
+    final authCtrl = TextEditingController(text: DeviceConfigService.authToken);
+
+    bool busy = false;
+    String? inlineStatus;
+    String? inlineError;
+
+    await _showAppDialog<void>(
+      title: "Service Settings",
+      width: 620,
+      dismissible: true,
+      content: StatefulBuilder(
+        builder: (ctx, setLocal) {
+          Widget banner({required String text, required bool isError}) {
+            return Container(
+              width: double.infinity,
+              padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color:
+                (isError ? Colors.red : Colors.green).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: (isError ? Colors.red : Colors.green)
+                      .withValues(alpha: 0.35),
+                  width: 2,
+                ),
+              ),
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.90),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            );
+          }
+
+          Future<void> verifyAndSave() async {
+            if (busy) return;
+
+            setLocal(() {
+              busy = true;
+              inlineError = null;
+              inlineStatus = "Testing connection…";
+            });
+
+            final test = await _testServiceSettings(
+              baseUrl: urlCtrl.text,
+              authToken: authCtrl.text,
+            );
+
+            if (!mounted) return;
+
+            if (!test.ok) {
+              setLocal(() {
+                busy = false;
+                inlineStatus = null;
+                inlineError = test.message;
+              });
+              if (mounted) setState(() => _message = test.message);
+              return;
+            }
+
+            await DeviceConfigService.setBaseUrl(urlCtrl.text);
+            await DeviceConfigService.setAuthToken(authCtrl.text);
+
+            setLocal(() {
+              busy = false;
+              inlineError = null;
+              inlineStatus = test.message;
+            });
+
+            if (mounted) setState(() => _message = test.message);
+
+            await Future.delayed(const Duration(milliseconds: 250));
+            if (!mounted) return;
+            Navigator.of(context).pop();
+          }
+
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _darkTextField(
+                controller: urlCtrl,
+                label: "Service Base URL",
+                hint: "https://apply.tsg.bz/tsgtcwebserviceotc/tsgtc.asmx",
+              ),
+              const SizedBox(height: 12),
+              _darkTextField(
+                controller: authCtrl,
+                label: "Auth Token",
+                hint: "",
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Tip: If punches won’t sync, confirm this URL matches the working kiosk web path.",
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.60),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (inlineError != null) ...[
+                const SizedBox(height: 12),
+                banner(text: inlineError!, isError: true),
+              ],
+              if (inlineStatus != null) ...[
+                const SizedBox(height: 12),
+                banner(text: inlineStatus!, isError: false),
+              ],
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  _dialogButton(
+                    label: "Cancel",
+                    filled: false,
+                    busy: busy,
+                    onTap: () => Navigator.of(context).pop(),
+                  ),
+                  const SizedBox(width: 10),
+                  _dialogButton(
+                    label: "Verify & Save",
+                    filled: true,
+                    busy: busy,
+                    onTap: verifyAndSave,
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+      actions: const [],
+    );
+  }
+
   // ===== Punch log (via 101010 only) =====
   Future<void> _showPunchLogDialog() async {
-    final box = Hive.box('punch_queue');
-    final keys = box.keys.toList();
-    final items = <Map<String, dynamic>>[];
-
-    for (final k in keys.reversed.take(200)) {
-      final v = box.get(k);
-      if (v is Map) {
-        items.add(v.map((key, value) => MapEntry(key.toString(), value)));
-      }
-    }
+    final items = _log.latest(limit: 300);
 
     String buildCsv(List<Map<String, dynamic>> rows) {
       final header = [
-        'kioskId',
-        'employeeId',
-        'punchType',
-        'localSequenceNumber',
         'timestampUtc',
-        'queuedAtUtc',
+        'employeeName',
+        'employeeId',
+        'status',
+        'latitude',
+        'longitude',
+        'localSequenceNumber',
+        'outcome',
+        'deviceId',
       ];
 
       final lines = <String>[];
       lines.add(header.join(','));
 
+      String q(String s) => '"${s.replaceAll('"', '""')}"';
+
       for (final m in rows) {
-        final kioskId = (m['kioskId'] ?? '').toString();
-        final emp = (m['employeeId'] ?? '').toString();
-        final type = (m['punchType'] ?? '').toString();
+        final ts = _normalizeIsoNoMillis((m['timestampUtc'] ?? '').toString());
+        final name = (m['employeeName'] ?? '').toString();
+        final empId = (m['employeeId'] ?? '').toString();
+        final status = (m['status'] ?? '').toString();
+        final lat = (m['latitude'] ?? '').toString();
+        final lng = (m['longitude'] ?? '').toString();
         final seq = (m['localSequenceNumber'] ?? '').toString();
-
-        final tsUtc = _normalizeIsoNoMillis((m['timestampUtc'] ?? '').toString());
-        final queuedAt = _normalizeIsoNoMillis((m['queuedAtUtc'] ?? '').toString());
-
-        String q(String s) => '"${s.replaceAll('"', '""')}"';
+        final outcome = (m['outcome'] ?? '').toString();
+        final dev = (m['deviceId'] ?? '').toString();
 
         lines.add([
-          q(kioskId),
-          q(emp),
-          q(type),
+          q(ts),
+          q(name),
+          q(empId),
+          q(status),
+          q(lat),
+          q(lng),
           q(seq),
-          q(tsUtc),
-          q(queuedAt),
+          q(outcome),
+          q(dev),
         ].join(','));
       }
 
@@ -630,12 +1072,8 @@ class _TabletScreenState extends State<TabletScreen> {
     String buildJson(List<Map<String, dynamic>> rows) {
       final cleaned = rows.map((m) {
         final copy = Map<String, dynamic>.from(m);
-
         copy['timestampUtc'] =
             _normalizeIsoNoMillis((copy['timestampUtc'] ?? '').toString());
-        copy['queuedAtUtc'] =
-            _normalizeIsoNoMillis((copy['queuedAtUtc'] ?? '').toString());
-
         return copy;
       }).toList();
 
@@ -648,78 +1086,215 @@ class _TabletScreenState extends State<TabletScreen> {
       setState(() => _message = "$label copied to clipboard.");
     }
 
-    await showDialog<void>(
-      context: context,
-      builder: (_) {
-        final csv = buildCsv(items);
-        final json = buildJson(items);
+    Widget pill(String text) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(999),
+          border:
+          Border.all(color: Colors.white.withValues(alpha: 0.14), width: 1.6),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.85),
+            fontWeight: FontWeight.w800,
+            fontSize: 12,
+          ),
+        ),
+      );
+    }
 
-        return AlertDialog(
-          title: const Text("Punch History (Offline Queue)"),
-          content: SizedBox(
-            width: 860,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+    await _showAppDialog<void>(
+      title: "Punch Log (This Tablet)",
+      width: 1000,
+      dismissible: true,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              pill("Pending: $_pendingCount"),
+              const SizedBox(width: 10),
+              pill("Showing: ${items.length}"),
+              const Spacer(),
+              _dialogButton(
+                label: "Copy CSV",
+                filled: false,
+                onTap: () => copyToClipboard("CSV export", buildCsv(items)),
+              ),
+              const SizedBox(width: 10),
+              _dialogButton(
+                label: "Copy JSON",
+                filled: false,
+                onTap: () => copyToClipboard("JSON export", buildJson(items)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(14),
+              border:
+              Border.all(color: Colors.white.withValues(alpha: 0.14), width: 2),
+            ),
+            child: Row(
               children: [
-                Text("Pending punches: $_pendingCount"),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    ElevatedButton(
-                      onPressed: () => copyToClipboard("CSV export", csv),
-                      child: const Text("Copy CSV"),
-                    ),
-                    const SizedBox(width: 10),
-                    ElevatedButton(
-                      onPressed: () => copyToClipboard("JSON export", json),
-                      child: const Text("Copy JSON"),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      "(paste into email/notes for admins)",
-                      style: TextStyle(color: Colors.grey.shade700),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Flexible(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      children: items.map((m) {
-                        final kioskId = (m['kioskId'] ?? '').toString();
-                        final emp = (m["employeeId"] ?? "").toString();
-                        final type = (m["punchType"] ?? "").toString();
-                        final ts = _normalizeIsoNoMillis((m["timestampUtc"] ?? "").toString());
-                        final seq = (m["localSequenceNumber"] ?? "").toString();
-
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: Text(
-                            "Kiosk: $kioskId | Emp: $emp | Type: $type | Seq: $seq | UTC: $ts",
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ),
+                _col("TIME (UTC)", flex: 3),
+                _col("EMP (NAME / ID)", flex: 4),
+                _col("STATUS", flex: 2),
+                _col("LAT/LNG", flex: 3),
               ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text("Close"),
+          const SizedBox(height: 8),
+          Container(
+            height: 420,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(14),
+              border:
+              Border.all(color: Colors.white.withValues(alpha: 0.12), width: 2),
             ),
-          ],
-        );
-      },
+            child: items.isEmpty
+                ? Center(
+              child: Text(
+                "No punches recorded on this tablet yet.",
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.70),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            )
+                : Scrollbar(
+              thumbVisibility: true,
+              child: ListView.separated(
+                padding: const EdgeInsets.all(10),
+                itemCount: items.length,
+                separatorBuilder: (_, __) => Divider(
+                  color: Colors.white.withValues(alpha: 0.10),
+                  height: 10,
+                ),
+                itemBuilder: (_, i) {
+                  final m = items[i];
+
+                  final ts = _normalizeIsoNoMillis(
+                      (m["timestampUtc"] ?? "").toString());
+                  final empId = (m["employeeId"] ?? "").toString();
+                  final empName = (m["employeeName"] ?? "").toString();
+                  final status =
+                  (m["status"] ?? "").toString().toUpperCase();
+                  final lat = (m["latitude"] as num?)?.toDouble();
+                  final lng = (m["longitude"] as num?)?.toDouble();
+
+                  final statusColor = status == "IN"
+                      ? Colors.green.withValues(alpha: 0.90)
+                      : status == "OUT"
+                      ? Colors.red.withValues(alpha: 0.90)
+                      : Colors.white.withValues(alpha: 0.80);
+
+                  final latLngText = (lat == null || lng == null)
+                      ? "(no location)"
+                      : "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}";
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.10),
+                          width: 1.6),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            ts.isEmpty ? "(unknown)" : ts,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Expanded(
+                          flex: 4,
+                          child: Text(
+                            "${empName.isEmpty ? "(unknown)" : empName} / $empId",
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Expanded(
+                          flex: 2,
+                          child: Text(
+                            status.isEmpty ? "?" : status,
+                            style: TextStyle(
+                              color: statusColor,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 12,
+                              letterSpacing: 0.6,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            latLngText,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.75),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        _dialogButton(
+          label: "Close",
+          filled: true,
+          onTap: () => Navigator.of(context).pop(),
+        ),
+      ],
+    );
+  }
+
+  static Widget _col(String label, {required int flex}) {
+    return Expanded(
+      flex: flex,
+      child: Text(
+        label,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.75),
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
+          letterSpacing: 0.6,
+        ),
+      ),
     );
   }
 
   // ===== Timestamp helpers (NO milliseconds) =====
-
-  /// ISO 8601 UTC with seconds only: YYYY-MM-DDTHH:mm:ssZ
   String _isoUtcNoMillis(DateTime utc) {
     final u = utc.toUtc();
     final yyyy = u.year.toString().padLeft(4, '0');
@@ -733,8 +1308,6 @@ class _TabletScreenState extends State<TabletScreen> {
         'Z';
   }
 
-  /// If an ISO string includes fractional seconds, strip them for display/export.
-  /// Example: 2026-03-03T10:11:12.345Z -> 2026-03-03T10:11:12Z
   String _normalizeIsoNoMillis(String s) {
     final t = s.trim();
     if (t.isEmpty) return t;
@@ -744,18 +1317,18 @@ class _TabletScreenState extends State<TabletScreen> {
 
     final before = t.substring(0, dot);
     final hasZ = t.toUpperCase().endsWith('Z');
-
     return hasZ ? '${before}Z' : before;
   }
 
-  // ===== UI =====
+  // ===== UI (unchanged layout) =====
   @override
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final scale = (constraints.maxWidth / 1600.0).clamp(0.78, 1.0);
+          final scale =
+          (constraints.maxWidth / 1600.0).clamp(0.78, 1.0).toDouble();
           double s(double v) => v * scale;
 
           final timeStr = _formatTime(_now);
@@ -799,8 +1372,6 @@ class _TabletScreenState extends State<TabletScreen> {
                       ],
                     ),
                   ),
-
-                  // Top-left: status line + heartbeat
                   Positioned(
                     left: s(24),
                     top: s(10),
@@ -846,15 +1417,14 @@ class _TabletScreenState extends State<TabletScreen> {
                       },
                     ),
                   ),
-
-                  // Top-right: Sync + Config Sync (regular buttons; NOT admin-gated)
                   Positioned(
                     right: s(24),
                     top: s(10),
                     child: Row(
                       children: [
                         TextButton(
-                          onPressed: _trySync,
+                          // Manual override bypasses grace window
+                          onPressed: () => _trySync(forceOnline: true),
                           child: Text(
                             "Sync Now",
                             style: TextStyle(
@@ -881,8 +1451,6 @@ class _TabletScreenState extends State<TabletScreen> {
                       ],
                     ),
                   ),
-
-                  // Bottom-right version label (NOT clickable)
                   Positioned(
                     right: s(24),
                     bottom: s(8),
@@ -904,6 +1472,7 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
+  // ===== UI helpers (unchanged from your build) =====
   Widget _buildLeftPanel(bool canVerify, double Function(double) s) {
     return Container(
       padding: EdgeInsets.all(s(18)),
@@ -1068,7 +1637,8 @@ class _TabletScreenState extends State<TabletScreen> {
           if (_verified && _fullName != null) ...[
             SizedBox(height: s(10)),
             Container(
-              padding: EdgeInsets.symmetric(horizontal: s(16), vertical: s(10)),
+              padding:
+              EdgeInsets.symmetric(horizontal: s(16), vertical: s(10)),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(s(16)),
@@ -1130,7 +1700,8 @@ class _TabletScreenState extends State<TabletScreen> {
                       ? SizedBox(
                     width: s(28),
                     height: s(28),
-                    child: const CircularProgressIndicator(strokeWidth: 3),
+                    child:
+                    const CircularProgressIndicator(strokeWidth: 3),
                   )
                       : Text(
                     actionText,
@@ -1236,7 +1807,9 @@ class _TabletScreenState extends State<TabletScreen> {
               color: Colors.white.withValues(alpha: 0.20),
               width: s(2),
             ),
-            color: filled ? Colors.white.withValues(alpha: 0.12) : Colors.transparent,
+            color: filled
+                ? Colors.white.withValues(alpha: 0.12)
+                : Colors.transparent,
           ),
           alignment: Alignment.center,
           child: Text(
