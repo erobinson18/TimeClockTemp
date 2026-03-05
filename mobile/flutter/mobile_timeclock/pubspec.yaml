@@ -40,3 +40,4 @@ flutter:
 
   assets:
     - assets/images/the_systems_group_logo.png
+    - assets/certs/tsg_cert.pem

@@ -34,8 +34,11 @@ class TabletScreen extends StatefulWidget {
 }
 
 class _TabletScreenState extends State<TabletScreen> {
-  late final TimeClockApi _api;
-  late final HeartbeatService _heartbeat;
+  // NOTE: These are created asynchronously now (pinned TLS)
+  TimeClockApi? _api;
+  HeartbeatService? _heartbeat;
+
+  bool _ready = false;
 
   final _queue = PunchQueue();
   final _log = PunchLogStore();
@@ -97,27 +100,52 @@ class _TabletScreenState extends State<TabletScreen> {
   @override
   void initState() {
     super.initState();
-
-    _api = TimeClockApi(ApiClient(
-      log: (m) => debugPrint(m),
-    ));
-    _heartbeat = HeartbeatService(api: _api);
-
-    _refreshPending();
     _startClock();
-    _warmupRoster();
+    _refreshPending();
+    _init(); // async pinned client init
+  }
 
-    _heartbeat.start();
+  Future<void> _init() async {
+    try {
+      // Create a pinned client so Android trusts the site certificate chain
+      final client = await ApiClient.pinned(
+        pemAssetPath: 'assets/certs/tsg_cert.pem',
+        log: (m) => debugPrint(m),
+        allowedHosts: const {'apply.tsg.bz', 'tcws.tsg.bz', 'tsg.bz'},
+      );
 
-    _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) => _trySync());
-    _trySync();
+      if (!mounted) return;
+
+      final api = TimeClockApi(client);
+      final hb = HeartbeatService(api: api);
+
+      setState(() {
+        _api = api;
+        _heartbeat = hb;
+        _ready = true;
+      });
+
+      // Start services that require _api
+      await _warmupRoster();
+      hb.start();
+
+      _syncTimer =
+          Timer.periodic(const Duration(seconds: 30), (_) => _trySync());
+      _trySync();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _message = "Init failed: $e";
+        _ready = false;
+      });
+    }
   }
 
   @override
   void dispose() {
     _clockTimer?.cancel();
     _syncTimer?.cancel();
-    _heartbeat.stop();
+    _heartbeat?.stop();
     super.dispose();
   }
 
@@ -170,6 +198,8 @@ class _TabletScreenState extends State<TabletScreen> {
 
   // ===== Connectivity =====
   Future<bool> _isOnline({bool force = false}) async {
+    if (!_ready || _api == null) return false;
+
     // If we recently detected server trouble, act offline for a short window
     // to avoid repeated pings / slow UX. "force" bypasses this (manual sync).
     if (!force && _serverInGraceWindow) return false;
@@ -178,7 +208,7 @@ class _TabletScreenState extends State<TabletScreen> {
     if (results.contains(ConnectivityResult.none)) return false;
 
     try {
-      await _api.ping();
+      await _api!.ping();
       _clearServerDown();
       return true;
     } catch (_) {
@@ -195,8 +225,9 @@ class _TabletScreenState extends State<TabletScreen> {
   // ===== Step 1: Warm roster cache from GetEmps =====
   Future<void> _warmupRoster() async {
     try {
+      if (!_ready || _api == null) return;
       if (!await _isOnline()) return;
-      final items = await _api.rosterAll();
+      final items = await _api!.rosterAll();
       final json = items.map((e) => e.toJson()).toList();
       await _rosterCache.saveAll(json);
     } catch (_) {}
@@ -211,6 +242,8 @@ class _TabletScreenState extends State<TabletScreen> {
 
   // ===== Sync =====
   Future<void> _trySync({bool forceOnline = false}) async {
+    if (!_ready || _api == null) return;
+
     try {
       _lastSyncAttemptLocal = DateTime.now();
 
@@ -248,7 +281,7 @@ class _TabletScreenState extends State<TabletScreen> {
         punches: punches,
       );
 
-      final result = await _api.syncBatch(batch);
+      final result = await _api!.syncBatch(batch);
 
       await _queue.removeByLocalSeq(result.acceptedSeq.toSet());
       await _refreshPending();
@@ -277,6 +310,11 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   Future<void> _verifyEmployee() async {
+    if (!_ready || _api == null) {
+      setState(() => _message = "Initializing… try again in a moment.");
+      return;
+    }
+
     final entry = _employeeNumber.trim();
 
     if (entry.isEmpty) {
@@ -342,8 +380,10 @@ class _TabletScreenState extends State<TabletScreen> {
 
   // ===== Status =====
   Future<void> _loadStatus(String guid) async {
+    if (!_ready || _api == null) return;
+
     try {
-      final StatusResponse s = await _api.status(guid);
+      final StatusResponse s = await _api!.status(guid);
       if (!mounted) return;
       setState(() => _clockedIn = s.isClockedIn);
       await _statusCache.setIsClockedIn(guid, s.isClockedIn);
@@ -427,10 +467,12 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   Future<bool> _validateOtCodeIfProvided(String otCode) async {
+    if (!_ready || _api == null) return false;
+
     final code = otCode.trim();
     if (code.isEmpty) return true;
 
-    final result = await _api.validateCode(
+    final result = await _api!.validateCode(
       otCode: code,
       action: _validateActionPunch,
     );
@@ -470,6 +512,11 @@ class _TabletScreenState extends State<TabletScreen> {
 
   // ===== Punch =====
   Future<void> _doPunch() async {
+    if (!_ready || _api == null) {
+      setState(() => _message = "Initializing… try again in a moment.");
+      return;
+    }
+
     if (!_verified || _employeeGuid == null || _employeeGuid!.trim().isEmpty) {
       setState(() => _message = "Verify first.");
       return;
@@ -588,7 +635,7 @@ class _TabletScreenState extends State<TabletScreen> {
         return;
       }
 
-      final s = await _api.punchAndGetStatus(
+      final s = await _api!.punchAndGetStatus(
         PunchRequest(
           employeeId: _employeeGuid!,
           punchType: punchType,
@@ -620,7 +667,6 @@ class _TabletScreenState extends State<TabletScreen> {
 
       Future.delayed(const Duration(seconds: 2), _resetSession);
     } catch (_) {
-      // Automatic failover: mark server down + queue immediately
       _markServerDown();
 
       await _queue.enqueue(queuedPayload);
@@ -653,7 +699,8 @@ class _TabletScreenState extends State<TabletScreen> {
     if (!mounted) return;
 
     setState(() {
-      _message = changed ? "Config updated." : "Config sync recorded (no backend yet).";
+      _message =
+      changed ? "Config updated." : "Config sync recorded (no backend yet).";
     });
   }
 
@@ -687,13 +734,21 @@ class _TabletScreenState extends State<TabletScreen> {
     }
 
     try {
-      final client = ApiClient(log: (m) => debugPrint(m));
+      // IMPORTANT: use pinned client here too, otherwise Verify & Save will still fail.
+      final client = await ApiClient.pinned(
+        pemAssetPath: 'assets/certs/tsg_cert.pem',
+        log: (m) => debugPrint(m),
+        allowedHosts: const {'apply.tsg.bz', 'tcws.tsg.bz', 'tsg.bz'},
+      );
+
       final xml = await client.postForm('$url/GetEmps', {'Auth': auth});
       final value = _extractSoapStringValue(xml);
 
       if (value.trim().isEmpty) {
-        return (ok: false,
-        message: "Server responded, but returned an empty value.");
+        return (
+        ok: false,
+        message: "Server responded, but returned an empty value."
+        );
       }
 
       final looksLikeHtml = value.toLowerCase().contains('<html') ||
@@ -896,11 +951,10 @@ class _TabletScreenState extends State<TabletScreen> {
           Widget banner({required String text, required bool isError}) {
             return Container(
               width: double.infinity,
-              padding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color:
-                (isError ? Colors.red : Colors.green).withValues(alpha: 0.12),
+                color: (isError ? Colors.red : Colors.green)
+                    .withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
                   color: (isError ? Colors.red : Colors.green)
@@ -1092,8 +1146,7 @@ class _TabletScreenState extends State<TabletScreen> {
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(999),
-          border:
-          Border.all(color: Colors.white.withValues(alpha: 0.14), width: 1.6),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.14), width: 1.6),
         ),
         child: Text(
           text,
@@ -1138,8 +1191,7 @@ class _TabletScreenState extends State<TabletScreen> {
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.06),
               borderRadius: BorderRadius.circular(14),
-              border:
-              Border.all(color: Colors.white.withValues(alpha: 0.14), width: 2),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.14), width: 2),
             ),
             child: Row(
               children: [
@@ -1156,8 +1208,7 @@ class _TabletScreenState extends State<TabletScreen> {
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.04),
               borderRadius: BorderRadius.circular(14),
-              border:
-              Border.all(color: Colors.white.withValues(alpha: 0.12), width: 2),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 2),
             ),
             child: items.isEmpty
                 ? Center(
@@ -1181,12 +1232,10 @@ class _TabletScreenState extends State<TabletScreen> {
                 itemBuilder: (_, i) {
                   final m = items[i];
 
-                  final ts = _normalizeIsoNoMillis(
-                      (m["timestampUtc"] ?? "").toString());
+                  final ts = _normalizeIsoNoMillis((m["timestampUtc"] ?? "").toString());
                   final empId = (m["employeeId"] ?? "").toString();
                   final empName = (m["employeeName"] ?? "").toString();
-                  final status =
-                  (m["status"] ?? "").toString().toUpperCase();
+                  final status = (m["status"] ?? "").toString().toUpperCase();
                   final lat = (m["latitude"] as num?)?.toDouble();
                   final lng = (m["longitude"] as num?)?.toDouble();
 
@@ -1201,14 +1250,11 @@ class _TabletScreenState extends State<TabletScreen> {
                       : "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}";
 
                   return Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.05),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.10),
-                          width: 1.6),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.10), width: 1.6),
                     ),
                     child: Row(
                       children: [
@@ -1320,7 +1366,7 @@ class _TabletScreenState extends State<TabletScreen> {
     return hasZ ? '${before}Z' : before;
   }
 
-  // ===== UI (unchanged layout) =====
+  // ===== UI =====
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -1337,8 +1383,8 @@ class _TabletScreenState extends State<TabletScreen> {
           final actionText = _clockedIn ? "CLOCK OUT" : "CLOCK IN";
           final actionColor = _clockedIn ? Colors.red : Colors.green;
 
-          final canVerify = !_verifying && !_punching;
-          final canPunch = _verified && !_verifying && !_punching;
+          final canVerify = _ready && !_verifying && !_punching;
+          final canPunch = _ready && _verified && !_verifying && !_punching;
 
           final lastConfig = RemoteConfigService.lastConfigSync;
 
@@ -1372,11 +1418,36 @@ class _TabletScreenState extends State<TabletScreen> {
                       ],
                     ),
                   ),
+
+                  // Top-left status
                   Positioned(
                     left: s(24),
                     top: s(10),
-                    child: ValueListenableBuilder<bool>(
-                      valueListenable: _heartbeat.online,
+                    child: !_ready || _heartbeat == null
+                        ? Row(
+                      children: [
+                        Container(
+                          width: s(10),
+                          height: s(10),
+                          decoration: const BoxDecoration(
+                            color: Colors.orange,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        SizedBox(width: s(8)),
+                        Text(
+                          "INITIALIZING…",
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.80),
+                            fontSize: s(12),
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: s(1),
+                          ),
+                        ),
+                      ],
+                    )
+                        : ValueListenableBuilder<bool>(
+                      valueListenable: _heartbeat!.online,
                       builder: (context, online, _) {
                         final dotColor = online ? Colors.green : Colors.red;
                         final text = _lastSyncAttemptLocal == null
@@ -1417,14 +1488,15 @@ class _TabletScreenState extends State<TabletScreen> {
                       },
                     ),
                   ),
+
+                  // Top-right buttons
                   Positioned(
                     right: s(24),
                     top: s(10),
                     child: Row(
                       children: [
                         TextButton(
-                          // Manual override bypasses grace window
-                          onPressed: () => _trySync(forceOnline: true),
+                          onPressed: !_ready ? null : () => _trySync(forceOnline: true),
                           child: Text(
                             "Sync Now",
                             style: TextStyle(
@@ -1451,6 +1523,8 @@ class _TabletScreenState extends State<TabletScreen> {
                       ],
                     ),
                   ),
+
+                  // Bottom-right version
                   Positioned(
                     right: s(24),
                     bottom: s(8),
@@ -1472,7 +1546,7 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
-  // ===== UI helpers (unchanged from your build) =====
+  // ===== UI helpers (unchanged layout) =====
   Widget _buildLeftPanel(bool canVerify, double Function(double) s) {
     return Container(
       padding: EdgeInsets.all(s(18)),
@@ -1637,8 +1711,7 @@ class _TabletScreenState extends State<TabletScreen> {
           if (_verified && _fullName != null) ...[
             SizedBox(height: s(10)),
             Container(
-              padding:
-              EdgeInsets.symmetric(horizontal: s(16), vertical: s(10)),
+              padding: EdgeInsets.symmetric(horizontal: s(16), vertical: s(10)),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(s(16)),
@@ -1700,8 +1773,7 @@ class _TabletScreenState extends State<TabletScreen> {
                       ? SizedBox(
                     width: s(28),
                     height: s(28),
-                    child:
-                    const CircularProgressIndicator(strokeWidth: 3),
+                    child: const CircularProgressIndicator(strokeWidth: 3),
                   )
                       : Text(
                     actionText,
@@ -1807,9 +1879,7 @@ class _TabletScreenState extends State<TabletScreen> {
               color: Colors.white.withValues(alpha: 0.20),
               width: s(2),
             ),
-            color: filled
-                ? Colors.white.withValues(alpha: 0.12)
-                : Colors.transparent,
+            color: filled ? Colors.white.withValues(alpha: 0.12) : Colors.transparent,
           ),
           alignment: Alignment.center,
           child: Text(
