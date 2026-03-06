@@ -1,14 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.mobile_timeclock">
 
-    <!-- Required for HTTP/HTTPS requests -->
     <uses-permission android:name="android.permission.INTERNET" />
-
-    <!-- Required for connectivity_plus to detect online/offline correctly -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-    <!-- Optional: sometimes helpful on older devices, safe to include -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!-- GPS / location for punch logging -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <application
         android:label="mobile_timeclock"

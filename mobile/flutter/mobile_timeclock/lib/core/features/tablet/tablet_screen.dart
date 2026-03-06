@@ -97,6 +97,48 @@ class _TabletScreenState extends State<TabletScreen> {
     _serverDownUntilUtc = null;
   }
 
+  // ============================================================
+  // ✅ NEW: Session Expired auto-reset (7 seconds)
+  // If an employee verifies and then does nothing, we reset the UI
+  // back to the default screen so the name doesn't stick forever.
+  // ============================================================
+  static const Duration _sessionExpireAfter = Duration(seconds: 7);
+  Timer? _sessionExpireTimer;
+
+  void _cancelSessionExpireTimer() {
+    _sessionExpireTimer?.cancel();
+    _sessionExpireTimer = null;
+  }
+
+  void _armSessionExpireTimer() {
+    _cancelSessionExpireTimer();
+
+    _sessionExpireTimer = Timer(_sessionExpireAfter, () {
+      if (!mounted) return;
+
+      // Only expire if we're still in a verified session and not actively punching/verifying.
+      if (_verified && !_punching && !_verifying) {
+        _resetSession();
+      }
+    });
+  }
+
+  // ============================================================
+  // ✅ NEW: CLEAR behavior helper
+  // If employee is verified (name showing), CLEAR returns to idle.
+  // Otherwise, CLEAR just clears the entry field like normal.
+  // ============================================================
+  void _handleClearPressed() {
+    HapticFeedback.selectionClick();
+
+    final hasName = (_fullName ?? "").trim().isNotEmpty;
+    if (_verified || hasName) {
+      _resetSession(); // go back to default/idle screen
+    } else {
+      _clearEntry(); // just clear digits
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -145,6 +187,7 @@ class _TabletScreenState extends State<TabletScreen> {
   void dispose() {
     _clockTimer?.cancel();
     _syncTimer?.cancel();
+    _sessionExpireTimer?.cancel(); // ✅ NEW
     _heartbeat?.stop();
     super.dispose();
   }
@@ -185,6 +228,9 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   void _resetSession() {
+    // ✅ NEW: cancel session timer when resetting
+    _cancelSessionExpireTimer();
+
     if (!mounted) return;
     setState(() {
       _employeeNumber = "";
@@ -307,6 +353,9 @@ class _TabletScreenState extends State<TabletScreen> {
       _clockedIn = res.isClockedIn;
       _message = message;
     });
+
+    // ✅ NEW: start session expiry timer after successful verify
+    _armSessionExpireTimer();
   }
 
   Future<void> _verifyEmployee() async {
@@ -522,6 +571,9 @@ class _TabletScreenState extends State<TabletScreen> {
       return;
     }
 
+    // ✅ NEW: stop session expiry once they actually punch
+    _cancelSessionExpireTimer();
+
     setState(() {
       _punching = true;
       _message = null;
@@ -614,6 +666,9 @@ class _TabletScreenState extends State<TabletScreen> {
           outcome: "CANCELED",
         );
         await revertOptimistic("Punch canceled.");
+
+        // ✅ NEW: if they cancel, they’re still “verified” so re-arm the timer
+        _armSessionExpireTimer();
         return;
       }
 
@@ -632,6 +687,9 @@ class _TabletScreenState extends State<TabletScreen> {
           outcome: "BLOCKED",
         );
         await revertOptimistic("Punch blocked (invalid code).");
+
+        // ✅ NEW: re-arm timer so they don’t remain stuck verified forever
+        _armSessionExpireTimer();
         return;
       }
 
@@ -1159,161 +1217,170 @@ class _TabletScreenState extends State<TabletScreen> {
       );
     }
 
+    // ✅ UPDATED (add-only): make the log dialog fit the screen by making list height responsive
     await _showAppDialog<void>(
       title: "Punch Log (This Tablet)",
-      width: 1000,
+      width: 950, // slightly smaller so it fits better on tablets
       dismissible: true,
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
+      content: LayoutBuilder(
+        builder: (ctx, constraints) {
+          // constraints.maxHeight is the available content height inside the dialog
+          final maxH = constraints.maxHeight;
+          final listH = (maxH.isFinite ? maxH * 0.62 : 360.0).clamp(260.0, 420.0);
+
+          return Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              pill("Pending: $_pendingCount"),
-              const SizedBox(width: 10),
-              pill("Showing: ${items.length}"),
-              const Spacer(),
-              _dialogButton(
-                label: "Copy CSV",
-                filled: false,
-                onTap: () => copyToClipboard("CSV export", buildCsv(items)),
+              Row(
+                children: [
+                  pill("Pending: $_pendingCount"),
+                  const SizedBox(width: 10),
+                  pill("Showing: ${items.length}"),
+                  const Spacer(),
+                  _dialogButton(
+                    label: "Copy CSV",
+                    filled: false,
+                    onTap: () => copyToClipboard("CSV export", buildCsv(items)),
+                  ),
+                  const SizedBox(width: 10),
+                  _dialogButton(
+                    label: "Copy JSON",
+                    filled: false,
+                    onTap: () => copyToClipboard("JSON export", buildJson(items)),
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              _dialogButton(
-                label: "Copy JSON",
-                filled: false,
-                onTap: () => copyToClipboard("JSON export", buildJson(items)),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.14), width: 2),
+                ),
+                child: Row(
+                  children: [
+                    _col("TIME (UTC)", flex: 3),
+                    _col("EMP (NAME / ID)", flex: 4),
+                    _col("STATUS", flex: 2),
+                    _col("LAT/LNG", flex: 3),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                height: listH.toDouble(), // ✅ responsive height
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 2),
+                ),
+                child: items.isEmpty
+                    ? Center(
+                  child: Text(
+                    "No punches recorded on this tablet yet.",
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.70),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                )
+                    : Scrollbar(
+                  thumbVisibility: true,
+                  child: ListView.separated(
+                    padding: const EdgeInsets.all(10),
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) => Divider(
+                      color: Colors.white.withValues(alpha: 0.10),
+                      height: 10,
+                    ),
+                    itemBuilder: (_, i) {
+                      final m = items[i];
+
+                      final ts = _normalizeIsoNoMillis((m["timestampUtc"] ?? "").toString());
+                      final empId = (m["employeeId"] ?? "").toString();
+                      final empName = (m["employeeName"] ?? "").toString();
+                      final status = (m["status"] ?? "").toString().toUpperCase();
+                      final lat = (m["latitude"] as num?)?.toDouble();
+                      final lng = (m["longitude"] as num?)?.toDouble();
+
+                      final statusColor = status == "IN"
+                          ? Colors.green.withValues(alpha: 0.90)
+                          : status == "OUT"
+                          ? Colors.red.withValues(alpha: 0.90)
+                          : Colors.white.withValues(alpha: 0.80);
+
+                      final latLngText = (lat == null || lng == null)
+                          ? "(no location)"
+                          : "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}";
+
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.10), width: 1.6),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: Text(
+                                ts.isEmpty ? "(unknown)" : ts,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.85),
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Expanded(
+                              flex: 4,
+                              child: Text(
+                                "${empName.isEmpty ? "(unknown)" : empName} / $empId",
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.85),
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Expanded(
+                              flex: 2,
+                              child: Text(
+                                status.isEmpty ? "?" : status,
+                                style: TextStyle(
+                                  color: statusColor,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 12,
+                                  letterSpacing: 0.6,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 3,
+                              child: Text(
+                                latLngText,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.75),
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
               ),
             ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.14), width: 2),
-            ),
-            child: Row(
-              children: [
-                _col("TIME (UTC)", flex: 3),
-                _col("EMP (NAME / ID)", flex: 4),
-                _col("STATUS", flex: 2),
-                _col("LAT/LNG", flex: 3),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            height: 420,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.04),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 2),
-            ),
-            child: items.isEmpty
-                ? Center(
-              child: Text(
-                "No punches recorded on this tablet yet.",
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.70),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            )
-                : Scrollbar(
-              thumbVisibility: true,
-              child: ListView.separated(
-                padding: const EdgeInsets.all(10),
-                itemCount: items.length,
-                separatorBuilder: (_, __) => Divider(
-                  color: Colors.white.withValues(alpha: 0.10),
-                  height: 10,
-                ),
-                itemBuilder: (_, i) {
-                  final m = items[i];
-
-                  final ts = _normalizeIsoNoMillis((m["timestampUtc"] ?? "").toString());
-                  final empId = (m["employeeId"] ?? "").toString();
-                  final empName = (m["employeeName"] ?? "").toString();
-                  final status = (m["status"] ?? "").toString().toUpperCase();
-                  final lat = (m["latitude"] as num?)?.toDouble();
-                  final lng = (m["longitude"] as num?)?.toDouble();
-
-                  final statusColor = status == "IN"
-                      ? Colors.green.withValues(alpha: 0.90)
-                      : status == "OUT"
-                      ? Colors.red.withValues(alpha: 0.90)
-                      : Colors.white.withValues(alpha: 0.80);
-
-                  final latLngText = (lat == null || lng == null)
-                      ? "(no location)"
-                      : "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}";
-
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.10), width: 1.6),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            ts.isEmpty ? "(unknown)" : ts,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.85),
-                              fontWeight: FontWeight.w800,
-                              fontSize: 12,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Expanded(
-                          flex: 4,
-                          child: Text(
-                            "${empName.isEmpty ? "(unknown)" : empName} / $empId",
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.85),
-                              fontWeight: FontWeight.w800,
-                              fontSize: 12,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Expanded(
-                          flex: 2,
-                          child: Text(
-                            status.isEmpty ? "?" : status,
-                            style: TextStyle(
-                              color: statusColor,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 12,
-                              letterSpacing: 0.6,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            latLngText,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.75),
-                              fontWeight: FontWeight.w800,
-                              fontSize: 12,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ],
+          );
+        },
       ),
       actions: [
         _dialogButton(
@@ -1817,7 +1884,7 @@ class _TabletScreenState extends State<TabletScreen> {
             Expanded(
               child: _keyButton(
                 label: "CLEAR",
-                onTap: _clearEntry,
+                onTap: _handleClearPressed, // ✅ NEW behavior
                 filled: true,
                 fontSize: s(18),
                 s: s,
