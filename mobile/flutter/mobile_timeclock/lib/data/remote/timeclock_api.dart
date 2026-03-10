@@ -14,10 +14,8 @@ class TimeClockApi {
   final ApiClient _client;
   TimeClockApi(this._client);
 
-  String get _base => DeviceConfigService.baseUrl; // ex: https://.../tsgtc.asmx
+  String get _base => DeviceConfigService.baseUrl;
   String get _auth => DeviceConfigService.authToken;
-
-  // was kioskId, now deviceId (but kioskId alias exists too)
   String get _deviceId => DeviceConfigService.deviceId;
 
   String _ep(String method) => '$_base/$method';
@@ -102,7 +100,7 @@ class TimeClockApi {
   }
 
   // =====================
-  // GetStatus (Step 2)
+  // GetStatus
   // =====================
   Future<String> getStatusRaw({
     required String empId,
@@ -126,7 +124,7 @@ class TimeClockApi {
 
     final raw = await getStatusRaw(
       empId: empId,
-      macAddress: _deviceId, // use deviceId
+      macAddress: _deviceId,
       currTime: _isoLocalNoMillis(nowLocal),
       otCode: otCode,
     );
@@ -143,7 +141,11 @@ class TimeClockApi {
   _ParsedStatus _parseGetStatus(String raw) {
     final trimmed = raw.trim();
     if (trimmed.isEmpty) {
-      return const _ParsedStatus(isClockedIn: false, fullName: null, rawStatus: null);
+      return const _ParsedStatus(
+        isClockedIn: false,
+        fullName: null,
+        rawStatus: null,
+      );
     }
 
     if (trimmed.contains(';')) {
@@ -178,20 +180,50 @@ class TimeClockApi {
     final t = raw.trim();
     final upper = t.toUpperCase();
 
-    if (t == '1') return const _ParsedStatus(isClockedIn: true, fullName: null, rawStatus: 'IN');
-    if (t == '0') return const _ParsedStatus(isClockedIn: false, fullName: null, rawStatus: 'OUT');
+    if (t == '1') {
+      return const _ParsedStatus(
+        isClockedIn: true,
+        fullName: null,
+        rawStatus: 'IN',
+      );
+    }
+
+    if (t == '0') {
+      return const _ParsedStatus(
+        isClockedIn: false,
+        fullName: null,
+        rawStatus: 'OUT',
+      );
+    }
 
     final containsIn = upper.contains('IN');
     final containsOut = upper.contains('OUT');
 
-    if (containsIn && !containsOut) return const _ParsedStatus(isClockedIn: true, fullName: null, rawStatus: 'IN');
-    if (containsOut && !containsIn) return const _ParsedStatus(isClockedIn: false, fullName: null, rawStatus: 'OUT');
+    if (containsIn && !containsOut) {
+      return const _ParsedStatus(
+        isClockedIn: true,
+        fullName: null,
+        rawStatus: 'IN',
+      );
+    }
 
-    return _ParsedStatus(isClockedIn: false, fullName: null, rawStatus: upper.isEmpty ? null : upper);
+    if (containsOut && !containsIn) {
+      return const _ParsedStatus(
+        isClockedIn: false,
+        fullName: null,
+        rawStatus: 'OUT',
+      );
+    }
+
+    return _ParsedStatus(
+      isClockedIn: false,
+      fullName: null,
+      rawStatus: upper.isEmpty ? null : upper,
+    );
   }
 
   // =====================
-  // CollectPunches (Step 3)
+  // CollectPunches
   // =====================
   Future<String> collectPunchesRaw({
     required String empId,
@@ -211,17 +243,22 @@ class TimeClockApi {
   }
 
   Future<void> punch(PunchRequest req, {String otCode = ''}) async {
-    final punchTime = _isoUtcNoMillis(req.timestampUtc.toUtc());
+    // IMPORTANT:
+    // Service expects LOCAL TABLET TIME, not UTC.
+    final punchTimeLocal = _isoLocalNoMillis(req.timestampUtc.toLocal());
 
     await collectPunchesRaw(
       empId: req.employeeId,
-      punchTime: punchTime,
-      macAddress: _deviceId, // use deviceId
+      punchTime: punchTimeLocal,
+      macAddress: _deviceId,
       otCode: otCode,
     );
   }
 
-  Future<StatusResponse> punchAndGetStatus(PunchRequest req, {String otCode = ''}) async {
+  Future<StatusResponse> punchAndGetStatus(
+      PunchRequest req, {
+        String otCode = '',
+      }) async {
     await punch(req, otCode: otCode);
     await Future.delayed(const Duration(milliseconds: 150));
     return status(req.employeeId, otCode: otCode);
@@ -236,12 +273,14 @@ class TimeClockApi {
 
     for (final p in batch.punches) {
       try {
-        final punchTime = _isoUtcNoMillis(p.timestampUtc.toUtc());
+        // IMPORTANT:
+        // queued punches were stored in UTC, but server wants LOCAL tablet time.
+        final punchTimeLocal = _isoLocalNoMillis(p.timestampUtc.toLocal());
 
         await collectPunchesRaw(
           empId: p.employeeId,
-          punchTime: punchTime,
-          macAddress: _deviceId, // use deviceId
+          punchTime: punchTimeLocal,
+          macAddress: _deviceId,
           otCode: otCode,
         );
 
@@ -254,7 +293,7 @@ class TimeClockApi {
   }
 
   // =====================
-  // ValidateCode (Step 4)
+  // ValidateCode
   // =====================
   Future<String> validateCodeRaw({
     required String otCode,
@@ -300,19 +339,6 @@ class TimeClockApi {
     final ss = dt.second.toString().padLeft(2, '0');
     return '$yyyy-$mm-$dd'
         'T$hh:$min:$ss';
-  }
-
-  String _isoUtcNoMillis(DateTime utc) {
-    final dt = utc.toUtc();
-    final yyyy = dt.year.toString().padLeft(4, '0');
-    final mm = dt.month.toString().padLeft(2, '0');
-    final dd = dt.day.toString().padLeft(2, '0');
-    final hh = dt.hour.toString().padLeft(2, '0');
-    final min = dt.minute.toString().padLeft(2, '0');
-    final ss = dt.second.toString().padLeft(2, '0');
-    return '$yyyy-$mm-$dd'
-        'T$hh:$min:$ss'
-        'Z';
   }
 
   String _extractStringValue(String xmlText) {

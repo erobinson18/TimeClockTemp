@@ -10,7 +10,6 @@ import 'package:geolocator/geolocator.dart';
 import '../../api_client.dart';
 import '../../Services/device_config_service.dart';
 import '../../services/heartbeat_service.dart';
-import '../../services/remote_config_service.dart';
 
 import '../../../data/local/local_seq_store.dart';
 import '../../../data/local/punch_queue.dart';
@@ -64,7 +63,7 @@ class _TabletScreenState extends State<TabletScreen> {
   // Device identifiers (Vista mapping NOT used)
   static const int deviceType = 1;
 
-  // ✅ Meraki / deployment will set this in the device config box
+  // Meraki / deployment will set this in the device config box
   String get _deviceId => DeviceConfigService.deviceId;
 
   Timer? _clockTimer;
@@ -75,9 +74,6 @@ class _TabletScreenState extends State<TabletScreen> {
   // Special access codes
   static const String _adminServiceCode = "009876";
   static const String _adminPunchLogCode = "101010";
-
-  // Phase 4: ValidateCode "Action" parameter
-  static const String _validateActionPunch = "PUNCH";
 
   // ===== Server-down grace window (automatic failover) =====
   static const Duration _serverDownGrace = Duration(minutes: 2);
@@ -98,9 +94,9 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   // ============================================================
-  // ✅ NEW: Session Expired auto-reset (7 seconds)
-  // If an employee verifies and then does nothing, we reset the UI
-  // back to the default screen so the name doesn't stick forever.
+  // Session Expired auto-reset (7 seconds)
+  // If an employee verifies and then does nothing, reset the UI
+  // back to the default screen so the name doesn't stay forever.
   // ============================================================
   static const Duration _sessionExpireAfter = Duration(seconds: 7);
   Timer? _sessionExpireTimer;
@@ -124,14 +120,14 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   // ============================================================
-  // ✅ NEW: CLEAR behavior helper
+  // CLEAR behavior helper
   // If employee is verified (name showing), CLEAR returns to idle.
   // Otherwise, CLEAR just clears the entry field like normal.
   // ============================================================
   void _handleClearPressed() {
     HapticFeedback.selectionClick();
 
-    final hasName = (_fullName ?? "").trim().isNotEmpty;
+    final hasName = _fullName?.trim().isNotEmpty ?? false;
     if (_verified || hasName) {
       _resetSession(); // go back to default/idle screen
     } else {
@@ -187,7 +183,7 @@ class _TabletScreenState extends State<TabletScreen> {
   void dispose() {
     _clockTimer?.cancel();
     _syncTimer?.cancel();
-    _sessionExpireTimer?.cancel(); // ✅ NEW
+    _sessionExpireTimer?.cancel();
     _heartbeat?.stop();
     super.dispose();
   }
@@ -228,7 +224,6 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   void _resetSession() {
-    // ✅ NEW: cancel session timer when resetting
     _cancelSessionExpireTimer();
 
     if (!mounted) return;
@@ -269,10 +264,11 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   // ===== Step 1: Warm roster cache from GetEmps =====
-  Future<void> _warmupRoster() async {
+  Future<void> _warmupRoster({bool skipOnlineCheck = false}) async {
     try {
       if (!_ready || _api == null) return;
-      if (!await _isOnline()) return;
+      if (!skipOnlineCheck && !await _isOnline()) return;
+
       final items = await _api!.rosterAll();
       final json = items.map((e) => e.toJson()).toList();
       await _rosterCache.saveAll(json);
@@ -354,7 +350,6 @@ class _TabletScreenState extends State<TabletScreen> {
       _message = message;
     });
 
-    // ✅ NEW: start session expiry timer after successful verify
     _armSessionExpireTimer();
   }
 
@@ -371,7 +366,7 @@ class _TabletScreenState extends State<TabletScreen> {
       return;
     }
 
-    // ✅ Admin screens MUST be accessible offline/online
+    // Admin screens must be accessible offline/online
     if (entry == _adminServiceCode) {
       _clearEntry();
       await _showServiceSettingsDialog();
@@ -392,7 +387,7 @@ class _TabletScreenState extends State<TabletScreen> {
     try {
       final online = await _isOnline();
       if (online) {
-        await _warmupRoster();
+        await _warmupRoster(skipOnlineCheck: true);
       }
 
       final cached = await _rosterCache.findByEmployeeNumber(entry);
@@ -444,7 +439,7 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-  // ===== Location (warn-only) =====
+  // ===== Location =====
   Future<Position?> _getBestEffortPosition() async {
     try {
       final enabled = await Geolocator.isLocationServiceEnabled();
@@ -460,79 +455,34 @@ class _TabletScreenState extends State<TabletScreen> {
         return null;
       }
 
+      // Try last known first (fast)
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null) {
+        final stamp = last.timestamp;
+        final age = DateTime.now().difference(stamp);
+
+        if (age.inMinutes <= 2) {
+          return last;
+        }
+      }
+
+      // Then ask for fresh current location
       return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 3),
+        desiredAccuracy: LocationAccuracy.best,
+        timeLimit: const Duration(seconds: 5),
       );
     } catch (_) {
       return null;
     }
   }
 
-  // ===== Phase 4 helper: prompt + validate OTCode (ONLINE ONLY) =====
-  Future<String?> _promptForOtCodeOnline() async {
-    final ctrl = TextEditingController();
+  String _locationSourceFromPosition(Position? pos) {
+    if (pos == null) return "none";
 
-    return _showAppDialog<String?>(
-      title: "Optional Site / OT Code",
-      width: 560,
-      dismissible: true,
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            "If your company requires a site/OT code for this punch, enter it now.\n\n"
-                "Leave blank to punch normally.",
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.85),
-              fontWeight: FontWeight.w600,
-              height: 1.25,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _darkTextField(
-            controller: ctrl,
-            label: "OT Code (optional)",
-            hint: "",
-            inputType: TextInputType.text,
-            onSubmitted: (_) => Navigator.of(context).pop(ctrl.text.trim()),
-          ),
-        ],
-      ),
-      actions: [
-        _dialogButton(
-          label: "Cancel",
-          filled: false,
-          onTap: () => Navigator.of(context).pop(null),
-        ),
-        _dialogButton(
-          label: "Continue",
-          filled: true,
-          onTap: () => Navigator.of(context).pop(ctrl.text.trim()),
-        ),
-      ],
-    );
-  }
-
-  Future<bool> _validateOtCodeIfProvided(String otCode) async {
-    if (!_ready || _api == null) return false;
-
-    final code = otCode.trim();
-    if (code.isEmpty) return true;
-
-    final result = await _api!.validateCode(
-      otCode: code,
-      action: _validateActionPunch,
-    );
-
-    if (!result.ok) {
-      if (!mounted) return false;
-      setState(() => _message = "Invalid code: ${result.rawMessage}");
-      return false;
-    }
-
-    return true;
+    final accuracy = pos.accuracy;
+    if (accuracy <= 25) return "gps";
+    if (accuracy <= 100) return "network";
+    return "approx";
   }
 
   Future<void> _writePunchLog({
@@ -543,6 +493,8 @@ class _TabletScreenState extends State<TabletScreen> {
     required String timestampUtc,
     required double? lat,
     required double? lng,
+    required double? accuracyMeters,
+    required String locationSource,
     required String outcome, // ONLINE_OK / OFFLINE_QUEUED / ERROR_QUEUED / CANCELED / BLOCKED
   }) async {
     await _log.add({
@@ -554,9 +506,30 @@ class _TabletScreenState extends State<TabletScreen> {
       "localSequenceNumber": localSeq,
       "latitude": lat,
       "longitude": lng,
+      "accuracyMeters": accuracyMeters,
+      "locationSource": locationSource,
       "outcome": outcome,
       "deviceId": _deviceId,
     });
+  }
+
+  Future<void> _finishPunchAndReset({
+    required bool newClockedInState,
+    required String successMessage,
+  }) async {
+    if (!mounted || _employeeGuid == null) return;
+
+    await _statusCache.setIsClockedIn(_employeeGuid!, newClockedInState);
+
+    if (!mounted) return;
+    setState(() {
+      _clockedIn = newClockedInState;
+      _message = successMessage;
+    });
+
+    await Future.delayed(const Duration(seconds: 1));
+    if (!mounted) return;
+    _resetSession();
   }
 
   // ===== Punch =====
@@ -571,7 +544,6 @@ class _TabletScreenState extends State<TabletScreen> {
       return;
     }
 
-    // ✅ NEW: stop session expiry once they actually punch
     _cancelSessionExpireTimer();
 
     setState(() {
@@ -585,10 +557,12 @@ class _TabletScreenState extends State<TabletScreen> {
     final nowUtc = DateTime.now().toUtc();
     final tsUtcNoMillis = _isoUtcNoMillis(nowUtc);
 
-    // Best-effort GPS (warn-only)
+    // Best-effort GPS / network location
     final pos = await _getBestEffortPosition();
     final lat = pos?.latitude;
     final lng = pos?.longitude;
+    final accuracy = pos?.accuracy;
+    final locationSource = _locationSourceFromPosition(pos);
 
     final queuedPayload = <String, dynamic>{
       "employeeId": _employeeGuid!,
@@ -597,28 +571,12 @@ class _TabletScreenState extends State<TabletScreen> {
       "timestampUtc": tsUtcNoMillis,
       "latitude": lat,
       "longitude": lng,
+      "accuracyMeters": accuracy,
+      "locationSource": locationSource,
     };
 
-    // optimistic UX
-    final prevClockedIn = _clockedIn;
     final newClockedIn = (punchType == 0);
 
-    setState(() {
-      _clockedIn = newClockedIn;
-      _message = (punchType == 0) ? "Clock In recorded." : "Clock Out recorded.";
-    });
-    await _statusCache.setIsClockedIn(_employeeGuid!, newClockedIn);
-
-    Future<void> revertOptimistic(String msg) async {
-      if (!mounted) return;
-      setState(() {
-        _clockedIn = prevClockedIn;
-        _message = msg;
-      });
-      await _statusCache.setIsClockedIn(_employeeGuid!, prevClockedIn);
-    }
-
-    // Always log what the tablet is doing (your requirement)
     final nameForLog =
     (_fullName ?? "").trim().isEmpty ? "(unknown)" : _fullName!.trim();
 
@@ -637,6 +595,8 @@ class _TabletScreenState extends State<TabletScreen> {
           timestampUtc: tsUtcNoMillis,
           lat: lat,
           lng: lng,
+          accuracyMeters: accuracy,
+          locationSource: locationSource,
           outcome: "OFFLINE_QUEUED",
         );
 
@@ -647,53 +607,14 @@ class _TabletScreenState extends State<TabletScreen> {
               "${_serverInGraceWindow ? " (Server unreachable)" : ""}";
         });
 
-        Future.delayed(const Duration(seconds: 2), _resetSession);
+        await Future.delayed(const Duration(seconds: 1));
+        if (!mounted) return;
+        _resetSession();
         return;
       }
 
-      // Online: prompt OT code
-      final otPrompt = await _promptForOtCodeOnline();
-
-      if (otPrompt == null) {
-        await _writePunchLog(
-          employeeId: _employeeGuid!,
-          employeeName: nameForLog,
-          punchType: punchType,
-          localSeq: seq,
-          timestampUtc: tsUtcNoMillis,
-          lat: lat,
-          lng: lng,
-          outcome: "CANCELED",
-        );
-        await revertOptimistic("Punch canceled.");
-
-        // ✅ NEW: if they cancel, they’re still “verified” so re-arm the timer
-        _armSessionExpireTimer();
-        return;
-      }
-
-      final otCode = otPrompt.trim();
-
-      final ok = await _validateOtCodeIfProvided(otCode);
-      if (!ok) {
-        await _writePunchLog(
-          employeeId: _employeeGuid!,
-          employeeName: nameForLog,
-          punchType: punchType,
-          localSeq: seq,
-          timestampUtc: tsUtcNoMillis,
-          lat: lat,
-          lng: lng,
-          outcome: "BLOCKED",
-        );
-        await revertOptimistic("Punch blocked (invalid code).");
-
-        // ✅ NEW: re-arm timer so they don’t remain stuck verified forever
-        _armSessionExpireTimer();
-        return;
-      }
-
-      final s = await _api!.punchAndGetStatus(
+      // Fast online punch: no optional code, no second status call
+      await _api!.punch(
         PunchRequest(
           employeeId: _employeeGuid!,
           punchType: punchType,
@@ -702,7 +623,6 @@ class _TabletScreenState extends State<TabletScreen> {
           localSequenceNumber: seq,
           timestampUtc: nowUtc,
         ),
-        otCode: otCode,
       );
 
       await _writePunchLog(
@@ -713,17 +633,16 @@ class _TabletScreenState extends State<TabletScreen> {
         timestampUtc: tsUtcNoMillis,
         lat: lat,
         lng: lng,
+        accuracyMeters: accuracy,
+        locationSource: locationSource,
         outcome: "ONLINE_OK",
       );
 
-      if (!mounted) return;
-      setState(() {
-        _clockedIn = s.isClockedIn;
-        _message = s.isClockedIn ? "You are now IN." : "You are now OUT.";
-      });
-      await _statusCache.setIsClockedIn(_employeeGuid!, s.isClockedIn);
-
-      Future.delayed(const Duration(seconds: 2), _resetSession);
+      await _finishPunchAndReset(
+        newClockedInState: newClockedIn,
+        successMessage:
+        newClockedIn ? "Clock In recorded." : "Clock Out recorded.",
+      );
     } catch (_) {
       _markServerDown();
 
@@ -738,29 +657,23 @@ class _TabletScreenState extends State<TabletScreen> {
         timestampUtc: tsUtcNoMillis,
         lat: lat,
         lng: lng,
+        accuracyMeters: accuracy,
+        locationSource: locationSource,
         outcome: "ERROR_QUEUED",
       );
 
       if (!mounted) return;
-      setState(() => _message =
-      "Server unreachable: Punch queued ($_pendingCount pending).");
+      setState(() =>
+      _message = "Server unreachable: Punch queued ($_pendingCount pending).");
 
-      Future.delayed(const Duration(seconds: 2), _resetSession);
+      await Future.delayed(const Duration(seconds: 1));
+      if (!mounted) return;
+      _resetSession();
     } finally {
       if (mounted) setState(() => _punching = false);
     }
   }
 
-  // ===== Remote config sync stub =====
-  Future<void> _syncConfig() async {
-    final changed = await RemoteConfigService.trySync();
-    if (!mounted) return;
-
-    setState(() {
-      _message =
-      changed ? "Config updated." : "Config sync recorded (no backend yet).";
-    });
-  }
 
   // ===== Verify & Save helpers for 009876 =====
   String _extractSoapStringValue(String xmlText) {
@@ -814,8 +727,7 @@ class _TabletScreenState extends State<TabletScreen> {
       if (looksLikeHtml) {
         return (
         ok: false,
-        message:
-        "Endpoint looks wrong (HTML response). Check the .asmx path."
+        message: "Endpoint looks wrong (HTML response). Check the .asmx path."
         );
       }
 
@@ -1144,6 +1056,8 @@ class _TabletScreenState extends State<TabletScreen> {
         'status',
         'latitude',
         'longitude',
+        'accuracyMeters',
+        'locationSource',
         'localSequenceNumber',
         'outcome',
         'deviceId',
@@ -1161,6 +1075,8 @@ class _TabletScreenState extends State<TabletScreen> {
         final status = (m['status'] ?? '').toString();
         final lat = (m['latitude'] ?? '').toString();
         final lng = (m['longitude'] ?? '').toString();
+        final accuracy = (m['accuracyMeters'] ?? '').toString();
+        final locationSource = (m['locationSource'] ?? '').toString();
         final seq = (m['localSequenceNumber'] ?? '').toString();
         final outcome = (m['outcome'] ?? '').toString();
         final dev = (m['deviceId'] ?? '').toString();
@@ -1172,6 +1088,8 @@ class _TabletScreenState extends State<TabletScreen> {
           q(status),
           q(lat),
           q(lng),
+          q(accuracy),
+          q(locationSource),
           q(seq),
           q(outcome),
           q(dev),
@@ -1204,7 +1122,8 @@ class _TabletScreenState extends State<TabletScreen> {
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.14), width: 1.6),
+          border:
+          Border.all(color: Colors.white.withValues(alpha: 0.14), width: 1.6),
         ),
         child: Text(
           text,
@@ -1217,16 +1136,15 @@ class _TabletScreenState extends State<TabletScreen> {
       );
     }
 
-    // ✅ UPDATED (add-only): make the log dialog fit the screen by making list height responsive
     await _showAppDialog<void>(
       title: "Punch Log (This Tablet)",
-      width: 950, // slightly smaller so it fits better on tablets
+      width: 950,
       dismissible: true,
       content: LayoutBuilder(
         builder: (ctx, constraints) {
-          // constraints.maxHeight is the available content height inside the dialog
           final maxH = constraints.maxHeight;
-          final listH = (maxH.isFinite ? maxH * 0.62 : 360.0).clamp(260.0, 420.0);
+          final listH =
+          (maxH.isFinite ? maxH * 0.62 : 360.0).clamp(260.0, 420.0);
 
           return Column(
             mainAxisSize: MainAxisSize.min,
@@ -1252,28 +1170,31 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.14), width: 2),
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.14), width: 2),
                 ),
                 child: Row(
                   children: [
-                    _col("TIME (UTC)", flex: 3),
+                    _col("TIME", flex: 3),
                     _col("EMP (NAME / ID)", flex: 4),
                     _col("STATUS", flex: 2),
-                    _col("LAT/LNG", flex: 3),
+                    _col("LAT/LNG ± ACC", flex: 3),
                   ],
                 ),
               ),
               const SizedBox(height: 8),
               Container(
-                height: listH.toDouble(), // ✅ responsive height
+                height: listH.toDouble(),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.04),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 2),
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.12), width: 2),
                 ),
                 child: items.isEmpty
                     ? Center(
@@ -1297,12 +1218,18 @@ class _TabletScreenState extends State<TabletScreen> {
                     itemBuilder: (_, i) {
                       final m = items[i];
 
-                      final ts = _normalizeIsoNoMillis((m["timestampUtc"] ?? "").toString());
+                      final ts =
+                      _formatLogDisplayTime((m["timestampUtc"] ?? "").toString());
                       final empId = (m["employeeId"] ?? "").toString();
                       final empName = (m["employeeName"] ?? "").toString();
-                      final status = (m["status"] ?? "").toString().toUpperCase();
+                      final status =
+                      (m["status"] ?? "").toString().toUpperCase();
                       final lat = (m["latitude"] as num?)?.toDouble();
                       final lng = (m["longitude"] as num?)?.toDouble();
+                      final accuracy =
+                      (m["accuracyMeters"] as num?)?.toDouble();
+                      final source =
+                      (m["locationSource"] ?? "").toString();
 
                       final statusColor = status == "IN"
                           ? Colors.green.withValues(alpha: 0.90)
@@ -1312,14 +1239,19 @@ class _TabletScreenState extends State<TabletScreen> {
 
                       final latLngText = (lat == null || lng == null)
                           ? "(no location)"
-                          : "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}";
+                          : accuracy == null
+                          ? "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}${source.isEmpty ? "" : " ($source)"}"
+                          : "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)} ±${accuracy.toStringAsFixed(1)}m${source.isEmpty ? "" : " ($source)"}";
 
                       return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.10), width: 1.6),
+                          border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.10),
+                              width: 1.6),
                         ),
                         child: Row(
                           children: [
@@ -1328,7 +1260,8 @@ class _TabletScreenState extends State<TabletScreen> {
                               child: Text(
                                 ts.isEmpty ? "(unknown)" : ts,
                                 style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.85),
+                                  color:
+                                  Colors.white.withValues(alpha: 0.85),
                                   fontWeight: FontWeight.w800,
                                   fontSize: 12,
                                 ),
@@ -1340,7 +1273,8 @@ class _TabletScreenState extends State<TabletScreen> {
                               child: Text(
                                 "${empName.isEmpty ? "(unknown)" : empName} / $empId",
                                 style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.85),
+                                  color:
+                                  Colors.white.withValues(alpha: 0.85),
                                   fontWeight: FontWeight.w800,
                                   fontSize: 12,
                                 ),
@@ -1364,7 +1298,8 @@ class _TabletScreenState extends State<TabletScreen> {
                               child: Text(
                                 latLngText,
                                 style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.75),
+                                  color:
+                                  Colors.white.withValues(alpha: 0.75),
                                   fontWeight: FontWeight.w800,
                                   fontSize: 12,
                                 ),
@@ -1407,7 +1342,7 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
-  // ===== Timestamp helpers (NO milliseconds) =====
+  // ===== Timestamp helpers =====
   String _isoUtcNoMillis(DateTime utc) {
     final u = utc.toUtc();
     final yyyy = u.year.toString().padLeft(4, '0');
@@ -1433,6 +1368,30 @@ class _TabletScreenState extends State<TabletScreen> {
     return hasZ ? '${before}Z' : before;
   }
 
+  String _formatLogDisplayTime(String rawUtc) {
+    final t = _normalizeIsoNoMillis(rawUtc);
+    if (t.isEmpty) return '';
+
+    try {
+      final dt = DateTime.parse(t).toLocal();
+
+      final mm = dt.month.toString().padLeft(2, '0');
+      final dd = dt.day.toString().padLeft(2, '0');
+      final yyyy = dt.year.toString();
+
+      int h = dt.hour;
+      final min = dt.minute.toString().padLeft(2, '0');
+      final sec = dt.second.toString().padLeft(2, '0');
+      final ampm = h >= 12 ? "PM" : "AM";
+      h = h % 12;
+      if (h == 0) h = 12;
+
+      return "$mm/$dd/$yyyy $h:$min:$sec $ampm";
+    } catch (_) {
+      return t.replaceAll('T', ' ').replaceAll('Z', '');
+    }
+  }
+
   // ===== UI =====
   @override
   Widget build(BuildContext context) {
@@ -1452,8 +1411,6 @@ class _TabletScreenState extends State<TabletScreen> {
 
           final canVerify = _ready && !_verifying && !_punching;
           final canPunch = _ready && _verified && !_verifying && !_punching;
-
-          final lastConfig = RemoteConfigService.lastConfigSync;
 
           return Scaffold(
             backgroundColor: Colors.black,
@@ -1516,7 +1473,8 @@ class _TabletScreenState extends State<TabletScreen> {
                         : ValueListenableBuilder<bool>(
                       valueListenable: _heartbeat!.online,
                       builder: (context, online, _) {
-                        final dotColor = online ? Colors.green : Colors.red;
+                        final dotColor =
+                        online ? Colors.green : Colors.red;
                         final text = _lastSyncAttemptLocal == null
                             ? "Pending offline punches: $_pendingCount"
                             : "Last Sync Attempt: ${_formatSyncStamp(_lastSyncAttemptLocal!)}   |   Pending: $_pendingCount";
@@ -1535,7 +1493,8 @@ class _TabletScreenState extends State<TabletScreen> {
                             Text(
                               online ? "ONLINE" : "OFFLINE",
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.80),
+                                color:
+                                Colors.white.withValues(alpha: 0.80),
                                 fontSize: s(12),
                                 fontWeight: FontWeight.w900,
                                 letterSpacing: s(1),
@@ -1545,7 +1504,8 @@ class _TabletScreenState extends State<TabletScreen> {
                             Text(
                               text,
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.75),
+                                color:
+                                Colors.white.withValues(alpha: 0.75),
                                 fontSize: s(12),
                                 fontWeight: FontWeight.w600,
                               ),
@@ -1563,23 +1523,10 @@ class _TabletScreenState extends State<TabletScreen> {
                     child: Row(
                       children: [
                         TextButton(
-                          onPressed: !_ready ? null : () => _trySync(forceOnline: true),
+                          onPressed:
+                          !_ready ? null : () => _trySync(forceOnline: true),
                           child: Text(
                             "Sync Now",
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.75),
-                              fontSize: s(12),
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        SizedBox(width: s(12)),
-                        TextButton(
-                          onPressed: _syncConfig,
-                          child: Text(
-                            lastConfig == null
-                                ? "Config Sync"
-                                : "Config Sync (${lastConfig.hour.toString().padLeft(2, '0')}:${lastConfig.minute.toString().padLeft(2, '0')})",
                             style: TextStyle(
                               color: Colors.white.withValues(alpha: 0.75),
                               fontSize: s(12),
@@ -1613,7 +1560,7 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
-  // ===== UI helpers (unchanged layout) =====
+  // ===== UI helpers =====
   Widget _buildLeftPanel(bool canVerify, double Function(double) s) {
     return Container(
       padding: EdgeInsets.all(s(18)),
@@ -1884,7 +1831,7 @@ class _TabletScreenState extends State<TabletScreen> {
             Expanded(
               child: _keyButton(
                 label: "CLEAR",
-                onTap: _handleClearPressed, // ✅ NEW behavior
+                onTap: _handleClearPressed,
                 filled: true,
                 fontSize: s(18),
                 s: s,
@@ -1946,7 +1893,9 @@ class _TabletScreenState extends State<TabletScreen> {
               color: Colors.white.withValues(alpha: 0.20),
               width: s(2),
             ),
-            color: filled ? Colors.white.withValues(alpha: 0.12) : Colors.transparent,
+            color: filled
+                ? Colors.white.withValues(alpha: 0.12)
+                : Colors.transparent,
           ),
           alignment: Alignment.center,
           child: Text(
