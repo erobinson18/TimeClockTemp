@@ -1,11 +1,14 @@
 // lib/core/features/tablet/tablet_screen.dart
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../api_client.dart';
 import '../../Services/device_config_service.dart';
@@ -33,7 +36,6 @@ class TabletScreen extends StatefulWidget {
 }
 
 class _TabletScreenState extends State<TabletScreen> {
-  // NOTE: These are created asynchronously now (pinned TLS)
   TimeClockApi? _api;
   HeartbeatService? _heartbeat;
 
@@ -46,12 +48,10 @@ class _TabletScreenState extends State<TabletScreen> {
   final _connectivity = Connectivity();
   final _seqStore = LocalSeqStore();
 
-  // Entry
   String _employeeNumber = "";
   bool _verifying = false;
   bool _punching = false;
 
-  // Session
   bool _verified = false;
   String? _employeeGuid;
   String? _fullName;
@@ -60,10 +60,7 @@ class _TabletScreenState extends State<TabletScreen> {
   String? _message;
   int _pendingCount = 0;
 
-  // Device identifiers (Vista mapping NOT used)
   static const int deviceType = 1;
-
-  // Meraki / deployment will set this in the device config box
   String get _deviceId => DeviceConfigService.deviceId;
 
   Timer? _clockTimer;
@@ -71,11 +68,9 @@ class _TabletScreenState extends State<TabletScreen> {
   DateTime _now = DateTime.now();
   DateTime? _lastSyncAttemptLocal;
 
-  // Special access codes
   static const String _adminServiceCode = "009876";
   static const String _adminPunchLogCode = "101010";
 
-  // ===== Server-down grace window (automatic failover) =====
   static const Duration _serverDownGrace = Duration(minutes: 2);
   DateTime? _serverDownUntilUtc;
 
@@ -93,11 +88,6 @@ class _TabletScreenState extends State<TabletScreen> {
     _serverDownUntilUtc = null;
   }
 
-  // ============================================================
-  // Session Expired auto-reset (7 seconds)
-  // If an employee verifies and then does nothing, reset the UI
-  // back to the default screen so the name doesn't stay forever.
-  // ============================================================
   static const Duration _sessionExpireAfter = Duration(seconds: 7);
   Timer? _sessionExpireTimer;
 
@@ -111,27 +101,20 @@ class _TabletScreenState extends State<TabletScreen> {
 
     _sessionExpireTimer = Timer(_sessionExpireAfter, () {
       if (!mounted) return;
-
-      // Only expire if we're still in a verified session and not actively punching/verifying.
       if (_verified && !_punching && !_verifying) {
         _resetSession();
       }
     });
   }
 
-  // ============================================================
-  // CLEAR behavior helper
-  // If employee is verified (name showing), CLEAR returns to idle.
-  // Otherwise, CLEAR just clears the entry field like normal.
-  // ============================================================
   void _handleClearPressed() {
     HapticFeedback.selectionClick();
 
-    final hasName = _fullName?.trim().isNotEmpty ?? false;
+    final hasName = (_fullName ?? "").trim().isNotEmpty;
     if (_verified || hasName) {
-      _resetSession(); // go back to default/idle screen
+      _resetSession();
     } else {
-      _clearEntry(); // just clear digits
+      _clearEntry();
     }
   }
 
@@ -140,12 +123,11 @@ class _TabletScreenState extends State<TabletScreen> {
     super.initState();
     _startClock();
     _refreshPending();
-    _init(); // async pinned client init
+    _init();
   }
 
   Future<void> _init() async {
     try {
-      // Create a pinned client so Android trusts the site certificate chain
       final client = await ApiClient.pinned(
         pemAssetPath: 'assets/certs/tsg_cert.pem',
         log: (m) => debugPrint(m),
@@ -163,12 +145,13 @@ class _TabletScreenState extends State<TabletScreen> {
         _ready = true;
       });
 
-      // Start services that require _api
       await _warmupRoster();
       hb.start();
 
-      _syncTimer =
-          Timer.periodic(const Duration(seconds: 30), (_) => _trySync());
+      _syncTimer = Timer.periodic(
+        const Duration(seconds: 30),
+            (_) => _trySync(),
+      );
       _trySync();
     } catch (e) {
       if (!mounted) return;
@@ -188,7 +171,6 @@ class _TabletScreenState extends State<TabletScreen> {
     super.dispose();
   }
 
-  // ===== Clock =====
   void _startClock() {
     _clockTimer?.cancel();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -197,7 +179,6 @@ class _TabletScreenState extends State<TabletScreen> {
     });
   }
 
-  // ===== Keypad =====
   void _appendDigit(String digit) {
     HapticFeedback.selectionClick();
     setState(() {
@@ -237,12 +218,9 @@ class _TabletScreenState extends State<TabletScreen> {
     });
   }
 
-  // ===== Connectivity =====
   Future<bool> _isOnline({bool force = false}) async {
     if (!_ready || _api == null) return false;
 
-    // If we recently detected server trouble, act offline for a short window
-    // to avoid repeated pings / slow UX. "force" bypasses this (manual sync).
     if (!force && _serverInGraceWindow) return false;
 
     final results = await _connectivity.checkConnectivity();
@@ -263,7 +241,6 @@ class _TabletScreenState extends State<TabletScreen> {
     return !results.contains(ConnectivityResult.none);
   }
 
-  // ===== Step 1: Warm roster cache from GetEmps =====
   Future<void> _warmupRoster({bool skipOnlineCheck = false}) async {
     try {
       if (!_ready || _api == null) return;
@@ -275,14 +252,12 @@ class _TabletScreenState extends State<TabletScreen> {
     } catch (_) {}
   }
 
-  // ===== Queue UI =====
   Future<void> _refreshPending() async {
     final c = await _queue.count();
     if (!mounted) return;
     setState(() => _pendingCount = c);
   }
 
-  // ===== Sync =====
   Future<void> _trySync({bool forceOnline = false}) async {
     if (!_ready || _api == null) return;
 
@@ -291,8 +266,10 @@ class _TabletScreenState extends State<TabletScreen> {
 
       if (!await _isOnline(force: forceOnline)) {
         if (forceOnline && mounted) {
-          setState(() => _message =
-          "Offline: cannot sync right now. (${_serverInGraceWindow ? "Server grace window" : "No connection"})");
+          setState(() {
+            _message =
+            "Offline: cannot sync right now. (${_serverInGraceWindow ? "Server grace window" : "No connection"})";
+          });
         }
         return;
       }
@@ -303,7 +280,6 @@ class _TabletScreenState extends State<TabletScreen> {
       final punches = pending.map((p) {
         final punchType = (p["punchType"] as num?)?.toInt() ?? 0;
         final localSeq = (p["localSequenceNumber"] as num?)?.toInt() ?? 0;
-
         final ts = (p["timestampUtc"] as String?) ??
             DateTime.now().toUtc().toIso8601String();
 
@@ -339,7 +315,6 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-  // ===== Verify =====
   void _applyVerified(VerifyResponse res, {required String message}) {
     if (!mounted) return;
     setState(() {
@@ -366,7 +341,6 @@ class _TabletScreenState extends State<TabletScreen> {
       return;
     }
 
-    // Admin screens must be accessible offline/online
     if (entry == _adminServiceCode) {
       _clearEntry();
       await _showServiceSettingsDialog();
@@ -422,7 +396,6 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-  // ===== Status =====
   Future<void> _loadStatus(String guid) async {
     if (!_ready || _api == null) return;
 
@@ -439,7 +412,6 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-  // ===== Location =====
   Future<Position?> _getBestEffortPosition() async {
     try {
       final enabled = await Geolocator.isLocationServiceEnabled();
@@ -455,18 +427,15 @@ class _TabletScreenState extends State<TabletScreen> {
         return null;
       }
 
-      // Try last known first (fast)
       final last = await Geolocator.getLastKnownPosition();
       if (last != null) {
-        final stamp = last.timestamp;
-        final age = DateTime.now().difference(stamp);
+        final age = DateTime.now().difference(last.timestamp);
 
         if (age.inMinutes <= 2) {
           return last;
         }
       }
 
-      // Then ask for fresh current location
       return await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.best,
         timeLimit: const Duration(seconds: 5),
@@ -495,7 +464,7 @@ class _TabletScreenState extends State<TabletScreen> {
     required double? lng,
     required double? accuracyMeters,
     required String locationSource,
-    required String outcome, // ONLINE_OK / OFFLINE_QUEUED / ERROR_QUEUED / CANCELED / BLOCKED
+    required String outcome,
   }) async {
     await _log.add({
       "timestampUtc": timestampUtc,
@@ -532,7 +501,6 @@ class _TabletScreenState extends State<TabletScreen> {
     _resetSession();
   }
 
-  // ===== Punch =====
   Future<void> _doPunch() async {
     if (!_ready || _api == null) {
       setState(() => _message = "Initializing… try again in a moment.");
@@ -557,7 +525,6 @@ class _TabletScreenState extends State<TabletScreen> {
     final nowUtc = DateTime.now().toUtc();
     final tsUtcNoMillis = _isoUtcNoMillis(nowUtc);
 
-    // Best-effort GPS / network location
     final pos = await _getBestEffortPosition();
     final lat = pos?.latitude;
     final lng = pos?.longitude;
@@ -613,7 +580,6 @@ class _TabletScreenState extends State<TabletScreen> {
         return;
       }
 
-      // Fast online punch: no optional code, no second status call
       await _api!.punch(
         PunchRequest(
           employeeId: _employeeGuid!,
@@ -663,8 +629,9 @@ class _TabletScreenState extends State<TabletScreen> {
       );
 
       if (!mounted) return;
-      setState(() =>
-      _message = "Server unreachable: Punch queued ($_pendingCount pending).");
+      setState(() {
+        _message = "Server unreachable: Punch queued ($_pendingCount pending).";
+      });
 
       await Future.delayed(const Duration(seconds: 1));
       if (!mounted) return;
@@ -674,8 +641,6 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-
-  // ===== Verify & Save helpers for 009876 =====
   String _extractSoapStringValue(String xmlText) {
     final m = RegExp(r'<string[^>]*>(.*?)</string>', dotAll: true)
         .firstMatch(xmlText);
@@ -705,7 +670,6 @@ class _TabletScreenState extends State<TabletScreen> {
     }
 
     try {
-      // IMPORTANT: use pinned client here too, otherwise Verify & Save will still fail.
       final client = await ApiClient.pinned(
         pemAssetPath: 'assets/certs/tsg_cert.pem',
         log: (m) => debugPrint(m),
@@ -737,7 +701,6 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-  // ===== Clean dialog framework (fade+scale transition) =====
   Future<T?> _showAppDialog<T>({
     required String title,
     required Widget content,
@@ -903,7 +866,6 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
-  // ===== Service settings (via 009876 only) =====
   Future<void> _showServiceSettingsDialog() async {
     final urlCtrl = TextEditingController(text: DeviceConfigService.baseUrl);
     final authCtrl = TextEditingController(text: DeviceConfigService.authToken);
@@ -1044,77 +1006,156 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
-  // ===== Punch log (via 101010 only) =====
+  String _buildPunchLogCsv(List<Map<String, dynamic>> rows) {
+    final header = [
+      'timestampUtc',
+      'employeeName',
+      'employeeId',
+      'status',
+      'latitude',
+      'longitude',
+      'accuracyMeters',
+      'locationSource',
+      'localSequenceNumber',
+      'outcome',
+      'deviceId',
+    ];
+
+    final lines = <String>[header.join(',')];
+
+    String q(String s) => '"${s.replaceAll('"', '""')}"';
+
+    for (final m in rows) {
+      final ts = _normalizeIsoNoMillis((m['timestampUtc'] ?? '').toString());
+      final name = (m['employeeName'] ?? '').toString();
+      final empId = (m['employeeId'] ?? '').toString();
+      final status = (m['status'] ?? '').toString();
+      final lat = (m['latitude'] ?? '').toString();
+      final lng = (m['longitude'] ?? '').toString();
+      final accuracy = (m['accuracyMeters'] ?? '').toString();
+      final locationSource = (m['locationSource'] ?? '').toString();
+      final seq = (m['localSequenceNumber'] ?? '').toString();
+      final outcome = (m['outcome'] ?? '').toString();
+      final dev = (m['deviceId'] ?? '').toString();
+
+      lines.add([
+        q(ts),
+        q(name),
+        q(empId),
+        q(status),
+        q(lat),
+        q(lng),
+        q(accuracy),
+        q(locationSource),
+        q(seq),
+        q(outcome),
+        q(dev),
+      ].join(','));
+    }
+
+    return lines.join('\n');
+  }
+
+  String _buildPunchLogJson(List<Map<String, dynamic>> rows) {
+    final cleaned = rows.map((m) {
+      final copy = Map<String, dynamic>.from(m);
+      copy['timestampUtc'] =
+          _normalizeIsoNoMillis((copy['timestampUtc'] ?? '').toString());
+      return copy;
+    }).toList();
+
+    return const JsonEncoder.withIndent('  ').convert(cleaned);
+  }
+
+  Future<void> _copyTextToClipboard(String label, String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    setState(() => _message = "$label copied to clipboard.");
+  }
+
+  Future<File> _writeCsvTempFile(String csv) async {
+    final dir = await getTemporaryDirectory();
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final path = '${dir.path}/punch_log_$stamp.csv';
+    final file = File(path);
+    await file.writeAsString(csv, flush: true);
+    return file;
+  }
+
+  Future<void> _exportCsvToDevice(String csv) async {
+    final file = await _writeCsvTempFile(csv);
+
+    await Share.shareXFiles(
+      [XFile(file.path, mimeType: 'text/csv')],
+      text: 'Punch Log CSV',
+      subject: 'Punch Log CSV',
+    );
+
+    if (!mounted) return;
+    setState(() => _message = "CSV ready to save/share.");
+  }
+
+  Future<void> _showCsvPreviewDialog(String csv) async {
+    final previewLines = const LineSplitter().convert(csv).take(20).join('\n');
+
+    await _showAppDialog<void>(
+      title: "CSV Preview",
+      width: 980,
+      dismissible: true,
+      content: Container(
+        constraints: const BoxConstraints(maxHeight: 430),
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.12),
+            width: 2,
+          ),
+        ),
+        child: SingleChildScrollView(
+          child: SelectableText(
+            previewLines,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.88),
+              fontFamily: 'monospace',
+              fontSize: 12,
+              height: 1.3,
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        _dialogButton(
+          label: "Close",
+          filled: false,
+          onTap: () => Navigator.of(context).pop(),
+        ),
+        _dialogButton(
+          label: "Copy CSV",
+          filled: false,
+          onTap: () async {
+            await _copyTextToClipboard("CSV", csv);
+            if (mounted) Navigator.of(context).pop();
+          },
+        ),
+        _dialogButton(
+          label: "Download CSV",
+          filled: true,
+          onTap: () async {
+            Navigator.of(context).pop();
+            await _exportCsvToDevice(csv);
+          },
+        ),
+      ],
+    );
+  }
+
   Future<void> _showPunchLogDialog() async {
     final items = _log.latest(limit: 300);
-
-    String buildCsv(List<Map<String, dynamic>> rows) {
-      final header = [
-        'timestampUtc',
-        'employeeName',
-        'employeeId',
-        'status',
-        'latitude',
-        'longitude',
-        'accuracyMeters',
-        'locationSource',
-        'localSequenceNumber',
-        'outcome',
-        'deviceId',
-      ];
-
-      final lines = <String>[];
-      lines.add(header.join(','));
-
-      String q(String s) => '"${s.replaceAll('"', '""')}"';
-
-      for (final m in rows) {
-        final ts = _normalizeIsoNoMillis((m['timestampUtc'] ?? '').toString());
-        final name = (m['employeeName'] ?? '').toString();
-        final empId = (m['employeeId'] ?? '').toString();
-        final status = (m['status'] ?? '').toString();
-        final lat = (m['latitude'] ?? '').toString();
-        final lng = (m['longitude'] ?? '').toString();
-        final accuracy = (m['accuracyMeters'] ?? '').toString();
-        final locationSource = (m['locationSource'] ?? '').toString();
-        final seq = (m['localSequenceNumber'] ?? '').toString();
-        final outcome = (m['outcome'] ?? '').toString();
-        final dev = (m['deviceId'] ?? '').toString();
-
-        lines.add([
-          q(ts),
-          q(name),
-          q(empId),
-          q(status),
-          q(lat),
-          q(lng),
-          q(accuracy),
-          q(locationSource),
-          q(seq),
-          q(outcome),
-          q(dev),
-        ].join(','));
-      }
-
-      return lines.join('\n');
-    }
-
-    String buildJson(List<Map<String, dynamic>> rows) {
-      final cleaned = rows.map((m) {
-        final copy = Map<String, dynamic>.from(m);
-        copy['timestampUtc'] =
-            _normalizeIsoNoMillis((copy['timestampUtc'] ?? '').toString());
-        return copy;
-      }).toList();
-
-      return const JsonEncoder.withIndent('  ').convert(cleaned);
-    }
-
-    Future<void> copyToClipboard(String label, String text) async {
-      await Clipboard.setData(ClipboardData(text: text));
-      if (!mounted) return;
-      setState(() => _message = "$label copied to clipboard.");
-    }
+    final csvText = _buildPunchLogCsv(items);
+    final jsonText = _buildPunchLogJson(items);
 
     Widget pill(String text) {
       return Container(
@@ -1144,7 +1185,7 @@ class _TabletScreenState extends State<TabletScreen> {
         builder: (ctx, constraints) {
           final maxH = constraints.maxHeight;
           final listH =
-          (maxH.isFinite ? maxH * 0.62 : 360.0).clamp(260.0, 420.0);
+          (maxH.isFinite ? maxH * 0.60 : 340.0).clamp(240.0, 390.0);
 
           return Column(
             mainAxisSize: MainAxisSize.min,
@@ -1158,32 +1199,83 @@ class _TabletScreenState extends State<TabletScreen> {
                   _dialogButton(
                     label: "Copy CSV",
                     filled: false,
-                    onTap: () => copyToClipboard("CSV export", buildCsv(items)),
+                    onTap: () => _copyTextToClipboard("CSV", csvText),
                   ),
                   const SizedBox(width: 10),
                   _dialogButton(
                     label: "Copy JSON",
                     filled: false,
-                    onTap: () => copyToClipboard("JSON export", buildJson(items)),
+                    onTap: () => _copyTextToClipboard("JSON", jsonText),
+                  ),
+                  const SizedBox(width: 10),
+                  _dialogButton(
+                    label: "Export CSV",
+                    filled: false,
+                    onTap: () => _showCsvPreviewDialog(csvText),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
               Container(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.14), width: 2),
+                    color: Colors.white.withValues(alpha: 0.14),
+                    width: 2,
+                  ),
                 ),
                 child: Row(
                   children: [
-                    _col("TIME", flex: 3),
-                    _col("EMP (NAME / ID)", flex: 4),
-                    _col("STATUS", flex: 2),
-                    _col("LAT/LNG ± ACC", flex: 3),
+                    Expanded(
+                      flex: 3,
+                      child: Text(
+                        "TIME ▼",
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.78),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 4,
+                      child: Text(
+                        "EMP (NAME / ID)",
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.78),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        "STATUS",
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.78),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 3,
+                      child: Text(
+                        "LAT/LNG ± ACC",
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.78),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1194,7 +1286,9 @@ class _TabletScreenState extends State<TabletScreen> {
                   color: Colors.white.withValues(alpha: 0.04),
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.12), width: 2),
+                    color: Colors.white.withValues(alpha: 0.12),
+                    width: 2,
+                  ),
                 ),
                 child: items.isEmpty
                     ? Center(
@@ -1211,15 +1305,13 @@ class _TabletScreenState extends State<TabletScreen> {
                   child: ListView.separated(
                     padding: const EdgeInsets.all(10),
                     itemCount: items.length,
-                    separatorBuilder: (_, __) => Divider(
-                      color: Colors.white.withValues(alpha: 0.10),
-                      height: 10,
-                    ),
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (_, i) {
                       final m = items[i];
 
-                      final ts =
-                      _formatLogDisplayTime((m["timestampUtc"] ?? "").toString());
+                      final ts = _formatLogDisplayTimeTwoLine(
+                        (m["timestampUtc"] ?? "").toString(),
+                      );
                       final empId = (m["employeeId"] ?? "").toString();
                       final empName = (m["employeeName"] ?? "").toString();
                       final status =
@@ -1231,65 +1323,96 @@ class _TabletScreenState extends State<TabletScreen> {
                       final source =
                       (m["locationSource"] ?? "").toString();
 
-                      final statusColor = status == "IN"
-                          ? Colors.green.withValues(alpha: 0.90)
+                      final statusBg = status == "IN"
+                          ? Colors.green.withValues(alpha: 0.12)
                           : status == "OUT"
-                          ? Colors.red.withValues(alpha: 0.90)
-                          : Colors.white.withValues(alpha: 0.80);
+                          ? Colors.red.withValues(alpha: 0.12)
+                          : Colors.white.withValues(alpha: 0.08);
+
+                      final statusBorder = status == "IN"
+                          ? Colors.green.withValues(alpha: 0.35)
+                          : status == "OUT"
+                          ? Colors.red.withValues(alpha: 0.35)
+                          : Colors.white.withValues(alpha: 0.14);
+
+                      final statusColor = status == "IN"
+                          ? Colors.green.withValues(alpha: 0.95)
+                          : status == "OUT"
+                          ? Colors.red.withValues(alpha: 0.95)
+                          : Colors.white.withValues(alpha: 0.85);
 
                       final latLngText = (lat == null || lng == null)
                           ? "(no location)"
                           : accuracy == null
                           ? "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}${source.isEmpty ? "" : " ($source)"}"
-                          : "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)} ±${accuracy.toStringAsFixed(1)}m${source.isEmpty ? "" : " ($source)"}";
+                          : "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}\n±${accuracy.toStringAsFixed(1)}m${source.isEmpty ? "" : " ($source)"}";
 
                       return Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(14),
                           border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.10),
-                              width: 1.6),
+                            color: Colors.white.withValues(alpha: 0.10),
+                            width: 1.4,
+                          ),
                         ),
                         child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
                             Expanded(
                               flex: 3,
                               child: Text(
                                 ts.isEmpty ? "(unknown)" : ts,
                                 style: TextStyle(
-                                  color:
-                                  Colors.white.withValues(alpha: 0.85),
+                                  color: Colors.white.withValues(alpha: 0.88),
                                   fontWeight: FontWeight.w800,
-                                  fontSize: 12,
+                                  fontSize: 11,
+                                  height: 1.25,
                                 ),
-                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                             Expanded(
                               flex: 4,
                               child: Text(
-                                "${empName.isEmpty ? "(unknown)" : empName} / $empId",
+                                "${empName.isEmpty ? "(unknown)" : empName}\n$empId",
                                 style: TextStyle(
-                                  color:
-                                  Colors.white.withValues(alpha: 0.85),
+                                  color: Colors.white.withValues(alpha: 0.88),
                                   fontWeight: FontWeight.w800,
-                                  fontSize: 12,
+                                  fontSize: 11,
+                                  height: 1.25,
                                 ),
-                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                             Expanded(
                               flex: 2,
-                              child: Text(
-                                status.isEmpty ? "?" : status,
-                                style: TextStyle(
-                                  color: statusColor,
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 12,
-                                  letterSpacing: 0.6,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: statusBg,
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: statusBorder,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    status.isEmpty ? "?" : status,
+                                    style: TextStyle(
+                                      color: statusColor,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 11,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -1298,12 +1421,11 @@ class _TabletScreenState extends State<TabletScreen> {
                               child: Text(
                                 latLngText,
                                 style: TextStyle(
-                                  color:
-                                  Colors.white.withValues(alpha: 0.75),
+                                  color: Colors.white.withValues(alpha: 0.78),
                                   fontWeight: FontWeight.w800,
-                                  fontSize: 12,
+                                  fontSize: 11,
+                                  height: 1.25,
                                 ),
-                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ],
@@ -1327,22 +1449,6 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
-  static Widget _col(String label, {required int flex}) {
-    return Expanded(
-      flex: flex,
-      child: Text(
-        label,
-        style: TextStyle(
-          color: Colors.white.withValues(alpha: 0.75),
-          fontWeight: FontWeight.w900,
-          fontSize: 12,
-          letterSpacing: 0.6,
-        ),
-      ),
-    );
-  }
-
-  // ===== Timestamp helpers =====
   String _isoUtcNoMillis(DateTime utc) {
     final u = utc.toUtc();
     final yyyy = u.year.toString().padLeft(4, '0');
@@ -1368,7 +1474,7 @@ class _TabletScreenState extends State<TabletScreen> {
     return hasZ ? '${before}Z' : before;
   }
 
-  String _formatLogDisplayTime(String rawUtc) {
+  String _formatLogDisplayTimeTwoLine(String rawUtc) {
     final t = _normalizeIsoNoMillis(rawUtc);
     if (t.isEmpty) return '';
 
@@ -1386,13 +1492,12 @@ class _TabletScreenState extends State<TabletScreen> {
       h = h % 12;
       if (h == 0) h = 12;
 
-      return "$mm/$dd/$yyyy $h:$min:$sec $ampm";
+      return "$mm/$dd/$yyyy $h:$min:$sec\n$ampm";
     } catch (_) {
       return t.replaceAll('T', ' ').replaceAll('Z', '');
     }
   }
 
-  // ===== UI =====
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -1442,8 +1547,6 @@ class _TabletScreenState extends State<TabletScreen> {
                       ],
                     ),
                   ),
-
-                  // Top-left status
                   Positioned(
                     left: s(24),
                     top: s(10),
@@ -1493,8 +1596,7 @@ class _TabletScreenState extends State<TabletScreen> {
                             Text(
                               online ? "ONLINE" : "OFFLINE",
                               style: TextStyle(
-                                color:
-                                Colors.white.withValues(alpha: 0.80),
+                                color: Colors.white.withValues(alpha: 0.80),
                                 fontSize: s(12),
                                 fontWeight: FontWeight.w900,
                                 letterSpacing: s(1),
@@ -1504,8 +1606,7 @@ class _TabletScreenState extends State<TabletScreen> {
                             Text(
                               text,
                               style: TextStyle(
-                                color:
-                                Colors.white.withValues(alpha: 0.75),
+                                color: Colors.white.withValues(alpha: 0.75),
                                 fontSize: s(12),
                                 fontWeight: FontWeight.w600,
                               ),
@@ -1515,8 +1616,6 @@ class _TabletScreenState extends State<TabletScreen> {
                       },
                     ),
                   ),
-
-                  // Top-right buttons
                   Positioned(
                     right: s(24),
                     top: s(10),
@@ -1537,8 +1636,6 @@ class _TabletScreenState extends State<TabletScreen> {
                       ],
                     ),
                   ),
-
-                  // Bottom-right version
                   Positioned(
                     right: s(24),
                     bottom: s(8),
@@ -1560,7 +1657,6 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
-  // ===== UI helpers =====
   Widget _buildLeftPanel(bool canVerify, double Function(double) s) {
     return Container(
       padding: EdgeInsets.all(s(18)),
@@ -1893,9 +1989,8 @@ class _TabletScreenState extends State<TabletScreen> {
               color: Colors.white.withValues(alpha: 0.20),
               width: s(2),
             ),
-            color: filled
-                ? Colors.white.withValues(alpha: 0.12)
-                : Colors.transparent,
+            color:
+            filled ? Colors.white.withValues(alpha: 0.12) : Colors.transparent,
           ),
           alignment: Alignment.center,
           child: Text(
