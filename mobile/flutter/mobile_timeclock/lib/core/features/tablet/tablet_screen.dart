@@ -28,6 +28,10 @@ import '../../../data/remote/timeclock_api.dart';
 
 import '../../../widgets/logo_header.dart';
 
+import '../startup/device_admin_reset_screen.dart';
+
+import'../../../main.dart';
+
 class TabletScreen extends StatefulWidget {
   const TabletScreen({super.key});
 
@@ -701,6 +705,122 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
+  Future<bool> _confirmLogoutWithAdminCode() async {
+    final codeCtrl = TextEditingController();
+    String? inlineError;
+    bool busy = false;
+
+    final ok = await _showAppDialog<bool>(
+      title: "Logout / Reset Device",
+      width: 560,
+      dismissible: true,
+      content: StatefulBuilder(
+        builder: (ctx, setLocal) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                "Are you sure you want to log out this device and return to the startup screen?\n\n"
+                    "To confirm, enter the admin code again.",
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.86),
+                  fontWeight: FontWeight.w700,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 14),
+              _darkTextField(
+                controller: codeCtrl,
+                label: "Re-enter Admin Code",
+                hint: "009876",
+                inputType: TextInputType.number,
+                onSubmitted: (_) async {
+                  final code = codeCtrl.text.trim();
+                  if (code != _adminServiceCode) {
+                    setLocal(() => inlineError = "Incorrect admin code.");
+                    return;
+                  }
+                  if (!mounted) return;
+                  Navigator.of(ctx).pop(true);
+                },
+              ),
+              if (inlineError != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Colors.red.withValues(alpha: 0.35),
+                      width: 2,
+                    ),
+                  ),
+                  child: Text(
+                    inlineError!,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.92),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  _dialogButton(
+                    label: "Cancel",
+                    filled: false,
+                    busy: busy,
+                    onTap: () => Navigator.of(ctx).pop(false),
+                  ),
+                  const SizedBox(width: 10),
+                  _dialogButton(
+                    label: "Yes, Logout",
+                    filled: true,
+                    busy: busy,
+                    onTap: () async {
+                      final code = codeCtrl.text.trim();
+                      if (code != _adminServiceCode) {
+                        setLocal(() => inlineError = "Incorrect admin code.");
+                        return;
+                      }
+                      setLocal(() => busy = true);
+                      if (!mounted) return;
+                      Navigator.of(ctx).pop(true);
+                    },
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+      actions: const [],
+    );
+
+    return ok ?? false;
+  }
+
+  Future<void> _performDeviceLogoutReset() async {
+    try {
+      await DeviceConfigService.clearLoginStateOnly();
+
+      if (!mounted) return;
+
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        Routes.startup,
+            (route) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _message = "Logout failed: $e");
+    }
+  }
+
+
   Future<T?> _showAppDialog<T>({
     required String title,
     required Widget content,
@@ -876,7 +996,7 @@ class _TabletScreenState extends State<TabletScreen> {
 
     await _showAppDialog<void>(
       title: "Service Settings",
-      width: 620,
+      width: 640,
       dismissible: true,
       content: StatefulBuilder(
         builder: (ctx, setLocal) {
@@ -885,12 +1005,10 @@ class _TabletScreenState extends State<TabletScreen> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: (isError ? Colors.red : Colors.green)
-                    .withValues(alpha: 0.12),
+                color: (isError ? Colors.red : Colors.green).withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: (isError ? Colors.red : Colors.green)
-                      .withValues(alpha: 0.35),
+                  color: (isError ? Colors.red : Colors.green).withValues(alpha: 0.35),
                   width: 2,
                 ),
               ),
@@ -940,10 +1058,18 @@ class _TabletScreenState extends State<TabletScreen> {
             });
 
             if (mounted) setState(() => _message = test.message);
+          }
 
-            await Future.delayed(const Duration(milliseconds: 250));
+          Future<void> logoutReset() async {
+            if (busy) return;
+
+            final confirmed = await _confirmLogoutWithAdminCode();
+            if (!confirmed) return;
+
             if (!mounted) return;
-            Navigator.of(context).pop();
+            Navigator.of(ctx).pop();
+
+            await _performDeviceLogoutReset();
           }
 
           return Column(
@@ -979,15 +1105,22 @@ class _TabletScreenState extends State<TabletScreen> {
                 const SizedBox(height: 12),
                 banner(text: inlineStatus!, isError: false),
               ],
-              const SizedBox(height: 14),
+              const SizedBox(height: 18),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   _dialogButton(
-                    label: "Cancel",
+                    label: "Logout / Reset",
                     filled: false,
                     busy: busy,
-                    onTap: () => Navigator.of(context).pop(),
+                    onTap: logoutReset,
+                  ),
+                  const SizedBox(width: 10),
+                  _dialogButton(
+                    label: "Close",
+                    filled: false,
+                    busy: busy,
+                    onTap: () => Navigator.of(ctx).pop(),
                   ),
                   const SizedBox(width: 10),
                   _dialogButton(
@@ -1005,6 +1138,7 @@ class _TabletScreenState extends State<TabletScreen> {
       actions: const [],
     );
   }
+
 
   String _buildPunchLogCsv(List<Map<String, dynamic>> rows) {
     final header = [

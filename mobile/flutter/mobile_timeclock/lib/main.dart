@@ -5,12 +5,14 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'core/services/secure_hive.dart';
 
 // Screens
+import 'core/features/startup/startup_gate_screen.dart';
 import 'core/features/tablet/tablet_screen.dart';
 import 'core/features/verify/verify_screen.dart';
 import 'core/features/status/status_screen.dart';
 
 class Routes {
-  static const String tablet = '/';
+  static const String startup = '/';
+  static const String tablet = '/tablet';
   static const String verify = '/verify';
   static const String status = '/status';
 }
@@ -25,8 +27,6 @@ Future<void> main() async {
   await Hive.openBox('punch_queue', encryptionCipher: SecureHive.cipher);
   await Hive.openBox('roster_cache', encryptionCipher: SecureHive.cipher);
   await Hive.openBox('status_cache', encryptionCipher: SecureHive.cipher);
-
-  // encrypt punch_log too (employee + gps data)
   await Hive.openBox('punch_log', encryptionCipher: SecureHive.cipher);
 
   await SystemChrome.setPreferredOrientations(const [
@@ -46,14 +46,23 @@ class TimeClockApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      initialRoute: Routes.tablet,
+      initialRoute: Routes.startup,
       onGenerateRoute: (settings) {
         switch (settings.name) {
+          case Routes.startup:
+            return MaterialPageRoute(
+              builder: (_) => const StartupGateScreen(),
+            );
+
           case Routes.tablet:
-            return MaterialPageRoute(builder: (_) => const TabletScreen());
+            return MaterialPageRoute(
+              builder: (_) => const TabletScreen(),
+            );
 
           case Routes.verify:
-            return MaterialPageRoute(builder: (_) => const VerifyScreen());
+            return MaterialPageRoute(
+              builder: (_) => const VerifyScreen(),
+            );
 
           case Routes.status:
             final guid = settings.arguments as String?;
