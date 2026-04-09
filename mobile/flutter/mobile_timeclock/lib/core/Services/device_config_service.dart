@@ -23,7 +23,7 @@ class DeviceConfigService {
 
   // Defaults
   static const String defaultBaseUrl = 'https://tcws.tsg.bz/tsgtc.asmx';
-  static const String defaultAuthToken = '';
+  static const String defaultAuthToken = 'PIG0L5PRHXMA0KE5R91YEM7HEY1QM';
   static const String defaultDeviceId = 'KIOSK-TEST-01';
 
   static Box get _box => Hive.box(boxName);

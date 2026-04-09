@@ -6,7 +6,24 @@ class VistaAuthService {
 
   VistaAuthService(this._client);
 
-  Future<VistaValidateResult> validateAccessCode(String accessCode) async {
+  Future<VistaValidateResult> validateNewSetupCode(String accessCode) async {
+    return _validateCode(
+      accessCode: accessCode,
+      action: 'N',
+    );
+  }
+
+  Future<VistaValidateResult> validateScheduledCode(String accessCode) async {
+    return _validateCode(
+      accessCode: accessCode,
+      action: 'S',
+    );
+  }
+
+  Future<VistaValidateResult> _validateCode({
+    required String accessCode,
+    required String action,
+  }) async {
     final baseUrl = DeviceConfigService.baseUrl.trim();
     final auth = DeviceConfigService.authToken.trim();
 
@@ -24,86 +41,44 @@ class VistaAuthService {
       );
     }
 
-    final actions = <String>[
-      'TABLET',
-      'VALIDATE',
-      'PUNCH',
-      '',
-    ];
+    try {
+      final xml = await _client.postForm(
+        '$baseUrl/ValidateCode',
+        {
+          'OTCode': accessCode.trim(),
+          'Auth': auth,
+          'Action': action,
+        },
+      );
 
-    String bestMessage = 'Invalid access code.';
+      final value = _extractSoapStringValue(xml).trim().toLowerCase();
 
-    for (final action in actions) {
-      try {
-        final xml = await _client.postForm(
-          '$baseUrl/ValidateCode',
-          {
-            'OTCode': accessCode.trim(),
-            'Auth': auth,
-            'Action': action,
-          },
+      if (value == 'true') {
+        return const VistaValidateResult(
+          ok: true,
+          message: 'Validated.',
         );
-
-        final value = _extractSoapStringValue(xml).trim();
-
-        if (value.isNotEmpty) {
-          bestMessage = value;
-        }
-
-        if (_looksValidResponse(value)) {
-          return VistaValidateResult(
-            ok: true,
-            message: value.isEmpty ? 'Validated.' : value,
-          );
-        }
-      } catch (e) {
-        bestMessage = 'Validation failed: $e';
       }
+
+      if (value == 'false') {
+        return VistaValidateResult(
+          ok: false,
+          message: action == 'N'
+              ? 'This access code is invalid, inactive, or already claimed.'
+              : 'This tablet code is no longer active.',
+        );
+      }
+
+      return VistaValidateResult(
+        ok: false,
+        message: value.isEmpty ? 'Unknown validation response.' : value,
+      );
+    } catch (e) {
+      return VistaValidateResult(
+        ok: false,
+        message: 'Validation failed: $e',
+      );
     }
-
-    return VistaValidateResult(
-      ok: false,
-      message: bestMessage,
-    );
-  }
-
-  bool _looksValidResponse(String value) {
-    final normalized = value.trim().toUpperCase();
-
-    if (normalized.isEmpty) return false;
-
-    const invalidTerms = [
-      'INVALID',
-      'FAIL',
-      'FAILED',
-      'ERROR',
-      'DENIED',
-      'FALSE',
-      'NOT FOUND',
-      'EXPIRED',
-      'DISABLED',
-      '0',
-    ];
-
-    for (final term in invalidTerms) {
-      if (normalized.contains(term)) return false;
-    }
-
-    const validTerms = [
-      'SUCCESS',
-      'VALID',
-      'TRUE',
-      'APPROVED',
-      'ACCEPTED',
-      'OK',
-      '1',
-    ];
-
-    for (final term in validTerms) {
-      if (normalized.contains(term)) return true;
-    }
-
-    return true;
   }
 
   String _extractSoapStringValue(String xmlText) {
