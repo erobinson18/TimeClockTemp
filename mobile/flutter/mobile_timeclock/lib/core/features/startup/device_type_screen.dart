@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../services/device_config_service.dart';
+import '../../Services/device_config_service.dart';
+import '../../api_client.dart';
 import '../../../widgets/logo_header.dart';
 import '../../../main.dart';
-import '../mobile/mobile_sso_login_screen.dart';
+import 'vista_auth_service.dart';
 
 class DeviceTypeScreen extends StatefulWidget {
   const DeviceTypeScreen({super.key});
@@ -63,9 +64,9 @@ class _DeviceTypeScreenState extends State<DeviceTypeScreen>
     await DeviceConfigService.setDeviceMode(DeviceMode.mobile);
     if (!mounted) return;
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const MobileSsoLoginScreen(),
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Mobile sign-in will be built next.'),
       ),
     );
   }
@@ -92,7 +93,7 @@ class _DeviceTypeScreenState extends State<DeviceTypeScreen>
       onTap: onTap,
       child: Ink(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(22),
@@ -100,38 +101,24 @@ class _DeviceTypeScreenState extends State<DeviceTypeScreen>
             color: Colors.white.withValues(alpha: 0.14),
             width: 2,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.22),
-              blurRadius: 18,
-              spreadRadius: 1,
-            ),
-          ],
         ),
         child: Row(
           children: [
             Container(
-              width: 62,
-              height: 62,
+              width: 58,
+              height: 58,
               decoration: BoxDecoration(
                 color: Colors.red.shade600.withValues(alpha: 0.92),
                 shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.red.shade700.withValues(alpha: 0.28),
-                    blurRadius: 16,
-                    spreadRadius: 1,
-                  ),
-                ],
               ),
               alignment: Alignment.center,
               child: Icon(
                 icon,
                 color: Colors.white,
-                size: 30,
+                size: 28,
               ),
             ),
-            const SizedBox(width: 18),
+            const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -140,18 +127,18 @@ class _DeviceTypeScreenState extends State<DeviceTypeScreen>
                     title,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 22,
+                      fontSize: 20,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 5),
                   Text(
                     subtitle,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.72),
-                      fontSize: 14,
+                      fontSize: 13.5,
                       fontWeight: FontWeight.w600,
-                      height: 1.35,
+                      height: 1.3,
                     ),
                   ),
                 ],
@@ -161,7 +148,7 @@ class _DeviceTypeScreenState extends State<DeviceTypeScreen>
             Icon(
               Icons.arrow_forward_ios_rounded,
               color: Colors.white.withValues(alpha: 0.70),
-              size: 20,
+              size: 18,
             ),
           ],
         ),
@@ -169,10 +156,10 @@ class _DeviceTypeScreenState extends State<DeviceTypeScreen>
     );
   }
 
-  Widget _buildBody() {
+  Widget _buildBody(BuildContext context) {
     return Container(
       width: 860,
-      padding: const EdgeInsets.all(28),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(28),
@@ -185,33 +172,33 @@ class _DeviceTypeScreenState extends State<DeviceTypeScreen>
         mainAxisSize: MainAxisSize.min,
         children: [
           const LogoHeader(
-            heightFactor: 0.18,
+            heightFactor: 0.16,
             padding: EdgeInsets.zero,
-            maxHeight: 150,
-            minHeight: 86,
+            maxHeight: 120,
+            minHeight: 72,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           const Text(
             "Choose Device Type",
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white,
-              fontSize: 32,
+              fontSize: 28,
               fontWeight: FontWeight.w900,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
             "Select how this device will be used before continuing to the time clock.",
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.75),
-              fontSize: 15,
+              fontSize: 14,
               fontWeight: FontWeight.w600,
-              height: 1.4,
+              height: 1.35,
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 22),
           _deviceCard(
             title: "Mobile Clock In Point",
             subtitle:
@@ -219,7 +206,7 @@ class _DeviceTypeScreenState extends State<DeviceTypeScreen>
             icon: Icons.phone_android_rounded,
             onTap: _selectMobile,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
           Row(
             children: [
               Expanded(
@@ -247,7 +234,7 @@ class _DeviceTypeScreenState extends State<DeviceTypeScreen>
               ),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
           _deviceCard(
             title: "Wall Mounted Tablet",
             subtitle:
@@ -264,18 +251,31 @@ class _DeviceTypeScreenState extends State<DeviceTypeScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
-        child: Center(
-          child: FadeTransition(
-            opacity: _fade,
-            child: SlideTransition(
-              position: _slide,
-              child: ScaleTransition(
-                scale: _scale,
-                child: _buildBody(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight - 40,
+                ),
+                child: Center(
+                  child: FadeTransition(
+                    opacity: _fade,
+                    child: SlideTransition(
+                      position: _slide,
+                      child: ScaleTransition(
+                        scale: _scale,
+                        child: _buildBody(context),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
@@ -293,6 +293,7 @@ class _WallTabletAccessScreenState extends State<WallTabletAccessScreen>
     with SingleTickerProviderStateMixin {
   final TextEditingController _codeController = TextEditingController();
   final FocusNode _codeFocus = FocusNode();
+  final ScrollController _scrollController = ScrollController();
 
   late final AnimationController _controller;
   late final Animation<double> _fade;
@@ -335,6 +336,8 @@ class _WallTabletAccessScreenState extends State<WallTabletAccessScreen>
 
     _controller.forward();
 
+    _codeFocus.addListener(_handleFocusChange);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _codeFocus.requestFocus();
@@ -342,11 +345,28 @@ class _WallTabletAccessScreenState extends State<WallTabletAccessScreen>
     });
   }
 
+  void _handleFocusChange() {
+    if (_codeFocus.hasFocus) {
+      Future.delayed(const Duration(milliseconds: 250), () {
+        if (!mounted) return;
+        if (!_scrollController.hasClients) return;
+
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+        );
+      });
+    }
+  }
+
   @override
   void dispose() {
     _controller.dispose();
     _codeController.dispose();
+    _codeFocus.removeListener(_handleFocusChange);
     _codeFocus.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -366,6 +386,27 @@ class _WallTabletAccessScreenState extends State<WallTabletAccessScreen>
     });
 
     try {
+      final client = await ApiClient.pinned(
+        pemAssetPath: 'assets/certs/tsg_cert.pem',
+        log: (m) => debugPrint(m),
+        allowedHosts: const {'apply.tsg.bz', 'tcws.tsg.bz', 'tsg.bz'},
+      );
+
+      final service = VistaAuthService(client);
+      final result = await service.validateAccessCode(code);
+
+      if (!mounted) return;
+
+      if (!result.ok) {
+        setState(() {
+          _busy = false;
+          _error = result.message.isEmpty
+              ? "Invalid access code."
+              : result.message;
+        });
+        return;
+      }
+
       await DeviceConfigService.configureAsWallTablet(accessCode: code);
 
       if (!mounted) return;
@@ -374,11 +415,11 @@ class _WallTabletAccessScreenState extends State<WallTabletAccessScreen>
         Routes.tablet,
             (route) => false,
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = "Unable to register this tablet right now.";
+        _error = "Unable to register this tablet: $e";
       });
     }
   }
@@ -411,7 +452,7 @@ class _WallTabletAccessScreenState extends State<WallTabletAccessScreen>
   Widget _buildBody() {
     return Container(
       width: 720,
-      padding: const EdgeInsets.all(28),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(28),
@@ -435,8 +476,8 @@ class _WallTabletAccessScreenState extends State<WallTabletAccessScreen>
                     Navigator.of(context).pop();
                   },
                   child: Container(
-                    width: 46,
-                    height: 46,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
@@ -455,35 +496,35 @@ class _WallTabletAccessScreenState extends State<WallTabletAccessScreen>
               const Expanded(child: SizedBox()),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           const LogoHeader(
-            heightFactor: 0.18,
+            heightFactor: 0.15,
             padding: EdgeInsets.zero,
-            maxHeight: 140,
-            minHeight: 82,
+            maxHeight: 110,
+            minHeight: 68,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 12),
           const Text(
             "Register Wall Mounted Tablet",
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white,
-              fontSize: 30,
+              fontSize: 26,
               fontWeight: FontWeight.w900,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
             "Enter the Vista access code assigned to this tablet location. This will link the device to its dedicated clock point.",
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.75),
-              fontSize: 15,
+              fontSize: 14,
               fontWeight: FontWeight.w600,
-              height: 1.4,
+              height: 1.35,
             ),
           ),
-          const SizedBox(height: 26),
+          const SizedBox(height: 18),
           TextField(
             controller: _codeController,
             focusNode: _codeFocus,
@@ -536,10 +577,10 @@ class _WallTabletAccessScreenState extends State<WallTabletAccessScreen>
             ),
           ),
           _buildErrorBanner(),
-          const SizedBox(height: 22),
+          const SizedBox(height: 18),
           SizedBox(
-            width: 280,
-            height: 56,
+            width: 260,
+            height: 54,
             child: ElevatedButton(
               onPressed: _busy ? null : _register,
               style: ElevatedButton.styleFrom(
@@ -576,20 +617,42 @@ class _WallTabletAccessScreenState extends State<WallTabletAccessScreen>
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
     return Scaffold(
       backgroundColor: Colors.black,
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
-        child: Center(
-          child: FadeTransition(
-            opacity: _fade,
-            child: SlideTransition(
-              position: _slide,
-              child: ScaleTransition(
-                scale: _scale,
-                child: _buildBody(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return AnimatedPadding(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              padding: EdgeInsets.fromLTRB(20, 20, 20, bottomInset + 20),
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                keyboardDismissBehavior:
+                ScrollViewKeyboardDismissBehavior.onDrag,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight - 40,
+                  ),
+                  child: Center(
+                    child: FadeTransition(
+                      opacity: _fade,
+                      child: SlideTransition(
+                        position: _slide,
+                        child: ScaleTransition(
+                          scale: _scale,
+                          child: _buildBody(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );

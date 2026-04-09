@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../services/device_config_service.dart';
+import '../../Services/device_config_service.dart';
 import '../../../widgets/logo_header.dart';
 import '../../../main.dart';
 import 'device_type_screen.dart';
