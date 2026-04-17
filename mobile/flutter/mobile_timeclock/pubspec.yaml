@@ -11,6 +11,9 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # Authentication
+  flutter_appauth: ^8.0.3
+
   # Networking
   http: ^1.2.2
   xml: ^6.5.0

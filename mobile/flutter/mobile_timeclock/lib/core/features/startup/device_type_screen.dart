@@ -5,6 +5,7 @@ import '../../api_client.dart';
 import '../../../widgets/logo_header.dart';
 import '../../../main.dart';
 import 'vista_auth_service.dart';
+import '../mobile/mobile_sso_login_screen.dart';
 
 class DeviceTypeScreen extends StatefulWidget {
   const DeviceTypeScreen({super.key});
@@ -64,9 +65,9 @@ class _DeviceTypeScreenState extends State<DeviceTypeScreen>
     await DeviceConfigService.setDeviceMode(DeviceMode.mobile);
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Mobile sign-in will be built next.'),
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const MobileSsoLoginScreen(),
       ),
     );
   }

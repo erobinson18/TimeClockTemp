@@ -16,7 +16,11 @@ class TimeClockApi {
 
   String get _base => DeviceConfigService.baseUrl;
   String get _auth => DeviceConfigService.authToken;
-  String get _deviceId => DeviceConfigService.deviceId;
+
+  //  These are now split correctly
+  String get _runtimeDeviceId => DeviceConfigService.runtimeDeviceIdentity;
+  String get _auditMacAddress => DeviceConfigService.deviceAuditIdentity;
+  String get _auditDescription => DeviceConfigService.auditDescription;
 
   String _ep(String method) => '$_base/$method';
 
@@ -124,7 +128,8 @@ class TimeClockApi {
 
     final raw = await getStatusRaw(
       empId: empId,
-      macAddress: _deviceId,
+      // ✅ Status call should use the audit MAC/device identity, not access code directly
+      macAddress: _auditMacAddress,
       currTime: _isoLocalNoMillis(nowLocal),
       otCode: otCode,
     );
@@ -229,12 +234,14 @@ class TimeClockApi {
     required String empId,
     required String punchTime,
     required String macAddress,
+    required String description,
     String otCode = '',
   }) async {
     final xml = await _client.postForm(_ep('CollectPunches'), {
       'EmpID': empId,
       'PunchTime': punchTime,
       'MACAddress': macAddress,
+      'Description': description,
       'Auth': _auth,
       'OTCode': otCode,
     });
@@ -250,7 +257,8 @@ class TimeClockApi {
     await collectPunchesRaw(
       empId: req.employeeId,
       punchTime: punchTimeLocal,
-      macAddress: _deviceId,
+      macAddress: req.macAddress,
+      description: req.description,
       otCode: otCode,
     );
   }
@@ -280,7 +288,10 @@ class TimeClockApi {
         await collectPunchesRaw(
           empId: p.employeeId,
           punchTime: punchTimeLocal,
-          macAddress: _deviceId,
+          // ✅ synced punches should also use the audit MAC/device identity
+          macAddress: _auditMacAddress,
+          // ✅ synced punches should write the access code/email into Description
+          description: _auditDescription,
           otCode: otCode,
         );
 

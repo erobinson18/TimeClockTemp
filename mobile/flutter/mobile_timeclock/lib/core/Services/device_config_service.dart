@@ -13,7 +13,7 @@ class DeviceConfigService {
   static const String _kAuthTokenKey = 'authToken';
   static const String _kDeviceIdKey = 'deviceId';
 
-  // New setup / login keys
+  // Setup / login keys
   static const String _kSetupCompleteKey = 'setupComplete';
   static const String _kDeviceModeKey = 'deviceMode';
   static const String _kWallTabletAccessCodeKey = 'wallTabletAccessCode';
@@ -21,10 +21,16 @@ class DeviceConfigService {
   static const String _kMobileDisplayNameKey = 'mobileDisplayName';
   static const String _kMobileEmailKey = 'mobileEmail';
 
+  // Audit / identity keys
+  static const String _kAuditMacAddressKey = 'auditMacAddress';
+  static const String _kAppVersionLabelKey = 'appVersionLabel';
+
   // Defaults
   static const String defaultBaseUrl = 'https://tcws.tsg.bz/tsgtc.asmx';
   static const String defaultAuthToken = 'PIG0L5PRHXMA0KE5R91YEM7HEY1QM';
-  static const String defaultDeviceId = 'KIOSK-TEST-01';
+  static const String defaultDeviceId = '';
+  static const String defaultAuditMacAddress = '02:00:00:00:00:00';
+  static const String defaultAppVersionLabel = 'ver 5.0.0 CST';
 
   static Box get _box => Hive.box(boxName);
 
@@ -79,6 +85,52 @@ class DeviceConfigService {
   static String get mobileEmail {
     final v = (_box.get(_kMobileEmailKey) as String?)?.trim() ?? '';
     return v;
+  }
+
+  static String get auditMacAddress {
+    final v = (_box.get(_kAuditMacAddressKey) as String?)?.trim() ?? '';
+    return v.isNotEmpty ? v : defaultAuditMacAddress;
+  }
+
+  static String get appVersionLabel {
+    final v = (_box.get(_kAppVersionLabelKey) as String?)?.trim() ?? '';
+    return v.isNotEmpty ? v : defaultAppVersionLabel;
+  }
+
+  static String get deviceAuditIdentity {
+    final mac = auditMacAddress.trim().isEmpty
+        ? defaultAuditMacAddress
+        : auditMacAddress.trim();
+
+    final ver = appVersionLabel.trim().isEmpty
+        ? defaultAppVersionLabel
+        : appVersionLabel.trim();
+
+    return '$mac - $ver';
+  }
+
+  static String get auditDescription {
+    if (deviceMode == DeviceMode.wallTablet) {
+      return wallTabletAccessCode;
+    }
+
+    if (deviceMode == DeviceMode.mobile) {
+      return mobileEmail;
+    }
+
+    return '';
+  }
+
+  static String get runtimeDeviceIdentity {
+    if (deviceMode == DeviceMode.wallTablet) {
+      return wallTabletAccessCode;
+    }
+
+    if (deviceMode == DeviceMode.mobile) {
+      return mobileEmail;
+    }
+
+    return deviceId;
   }
 
   static bool get isWallTabletConfigured {
@@ -139,11 +191,25 @@ class DeviceConfigService {
     await _box.put(_kMobileEmailKey, value.trim());
   }
 
+  static Future<void> setAuditMacAddress(String value) async {
+    await _box.put(_kAuditMacAddressKey, value.trim());
+  }
+
+  static Future<void> setAppVersionLabel(String value) async {
+    await _box.put(_kAppVersionLabelKey, value.trim());
+  }
+
   static Future<void> configureAsWallTablet({
     required String accessCode,
   }) async {
     await setDeviceMode(DeviceMode.wallTablet);
     await setWallTabletAccessCode(accessCode);
+    await setDeviceId(accessCode);
+    await setSetupComplete(true);
+
+    // Device Mac Here (One Time)
+    await setAuditMacAddress('02:00:00:00:00:00'); // replace later with real value
+    await setAppVersionLabel('ver 5.0.0 CST');
     await setSetupComplete(true);
 
     // Clear mobile state
@@ -160,6 +226,7 @@ class DeviceConfigService {
     await setMobileSignedIn(true);
     await setMobileDisplayName(displayName);
     await setMobileEmail(email);
+    await setDeviceId(email);
     await setSetupComplete(true);
 
     // Clear wall tablet state
@@ -173,6 +240,7 @@ class DeviceConfigService {
     await setMobileSignedIn(false);
     await setMobileDisplayName('');
     await setMobileEmail('');
+    await setDeviceId('');
   }
 
   static Future<void> resetToDefaults() async {
@@ -186,5 +254,7 @@ class DeviceConfigService {
     await _box.put(_kMobileSignedInKey, false);
     await _box.put(_kMobileDisplayNameKey, '');
     await _box.put(_kMobileEmailKey, '');
+    await _box.put(_kAuditMacAddressKey, defaultAuditMacAddress);
+    await _box.put(_kAppVersionLabelKey, defaultAppVersionLabel);
   }
 }

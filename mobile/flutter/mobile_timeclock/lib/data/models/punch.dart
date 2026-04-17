@@ -6,6 +6,8 @@ class PunchRequest {
 
   final int deviceType;
   final String deviceId;
+  final String macAddress;
+  final String description;
 
   final int localSequenceNumber;
   final DateTime timestampUtc;
@@ -15,6 +17,8 @@ class PunchRequest {
     required this.punchType,
     required this.deviceType,
     required this.deviceId,
+    required this.macAddress,
+    required this.description,
     required this.localSequenceNumber,
     required this.timestampUtc,
   });

@@ -28,7 +28,7 @@ import '../../../data/remote/timeclock_api.dart';
 
 import '../../../widgets/logo_header.dart';
 
-import '../startup/device_admin_reset_screen.dart';
+// import '../startup/device_admin_reset_screen.dart';
 
 import'../../../main.dart';
 
@@ -589,7 +589,9 @@ class _TabletScreenState extends State<TabletScreen> {
           employeeId: _employeeGuid!,
           punchType: punchType,
           deviceType: deviceType,
-          deviceId: _deviceId,
+          deviceId: DeviceConfigService.runtimeDeviceIdentity,
+          macAddress: DeviceConfigService.deviceAuditIdentity,
+          description: DeviceConfigService.auditDescription,
           localSequenceNumber: seq,
           timestampUtc: nowUtc,
         ),
@@ -1067,7 +1069,7 @@ class _TabletScreenState extends State<TabletScreen> {
             if (!confirmed) return;
 
             if (!mounted) return;
-            Navigator.of(ctx).pop();
+            Navigator.of(context).pop();
 
             await _performDeviceLogoutReset();
           }
@@ -1774,7 +1776,7 @@ class _TabletScreenState extends State<TabletScreen> {
                     right: s(24),
                     bottom: s(8),
                     child: Text(
-                      "ver 4.0.1",
+                      "ver 5.0.0",
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.55),
                         fontSize: s(12),

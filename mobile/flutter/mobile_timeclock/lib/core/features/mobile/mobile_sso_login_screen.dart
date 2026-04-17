@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../services/device_config_service.dart';
+// import '../../Services/device_config_service.dart';
 import '../../../widgets/logo_header.dart';
 import '../../../main.dart';
+import 'mobile_auth_service.dart';
 
 class MobileSsoLoginScreen extends StatefulWidget {
   const MobileSsoLoginScreen({super.key});
@@ -67,29 +68,27 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
       _message = null;
     });
 
-    try {
-      await Future.delayed(const Duration(milliseconds: 900));
+    final result = await MobileAuthService.instance.signIn();
 
-      // Temporary completion hook until real Microsoft 365 integration is added.
-      // This keeps the whole startup flow working right now.
-      await DeviceConfigService.configureAsMobile(
-        displayName: 'Microsoft User',
-        email: 'user@company.com',
-      );
+    if (!mounted) return;
 
-      if (!mounted) return;
-
-      Navigator.of(context).pushNamedAndRemoveUntil(
-        Routes.tablet,
-            (route) => false,
-      );
-    } catch (_) {
-      if (!mounted) return;
+    if (!result.ok) {
       setState(() {
         _busy = false;
-        _message = "Microsoft sign-in could not be completed.";
+        _message = result.message;
       });
+      return;
     }
+
+    setState(() {
+      _busy = false;
+      _message = result.message;
+    });
+
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      Routes.tablet,
+          (route) => false,
+    );
   }
 
   Widget _messageBanner() {
@@ -222,7 +221,7 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  "This button is wired to the full setup flow now. The real Azure/Microsoft authentication package can be connected next without changing the screen structure.",
+                  "This signs the user in with Microsoft and stores the mobile user's email for the timeclock device profile.",
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.72),
@@ -237,7 +236,7 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
           _messageBanner(),
           const SizedBox(height: 24),
           SizedBox(
-            width: 300,
+            width: 320,
             height: 58,
             child: ElevatedButton.icon(
               onPressed: _busy ? null : _handleMicrosoftSignIn,

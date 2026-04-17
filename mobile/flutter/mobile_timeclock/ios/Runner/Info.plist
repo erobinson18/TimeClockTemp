@@ -51,5 +51,20 @@
 
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>This app uses location to record where each punch was made for audit and punch history.</string>
+
+	<key>CFBundleURLTypes</key>
+    <array>
+      <dict>
+        <key>CFBundleTypeRole</key>
+        <string>Editor</string>
+        <key>CFBundleURLName</key>
+        <string>microsoft-auth</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+          <string>YOUR_IOS_REDIRECT_SCHEME_HERE</string>
+        </array>
+      </dict>
+    </array>
+
 </dict>
 </plist>
