@@ -17,8 +17,7 @@ class TimeClockApi {
   String get _base => DeviceConfigService.baseUrl;
   String get _auth => DeviceConfigService.authToken;
 
-  //  These are now split correctly
-  String get _runtimeDeviceId => DeviceConfigService.runtimeDeviceIdentity;
+  // String get _runtimeDeviceId => DeviceConfigService.runtimeDeviceIdentity;
   String get _auditMacAddress => DeviceConfigService.deviceAuditIdentity;
   String get _auditDescription => DeviceConfigService.auditDescription;
 
@@ -126,12 +125,13 @@ class TimeClockApi {
   Future<StatusResponse> status(String empId, {String otCode = ''}) async {
     final nowLocal = DateTime.now();
 
+    final effectiveOtCode = otCode.trim().isNotEmpty ? otCode : _auditDescription;
+
     final raw = await getStatusRaw(
       empId: empId,
-      // ✅ Status call should use the audit MAC/device identity, not access code directly
       macAddress: _auditMacAddress,
       currTime: _isoLocalNoMillis(nowLocal),
-      otCode: otCode,
+      otCode: effectiveOtCode,
     );
 
     final parsed = _parseGetStatus(raw);
@@ -237,29 +237,30 @@ class TimeClockApi {
     required String description,
     String otCode = '',
   }) async {
+    final effectiveOtCode = otCode.trim().isNotEmpty ? otCode : description;
+
     final xml = await _client.postForm(_ep('CollectPunches'), {
       'EmpID': empId,
       'PunchTime': punchTime,
       'MACAddress': macAddress,
       'Description': description,
       'Auth': _auth,
-      'OTCode': otCode,
+      'OTCode': effectiveOtCode,
     });
 
     return _extractStringValue(xml);
   }
 
   Future<void> punch(PunchRequest req, {String otCode = ''}) async {
-    // IMPORTANT:
-    // Service expects LOCAL TABLET TIME, not UTC.
     final punchTimeLocal = _isoLocalNoMillis(req.timestampUtc.toLocal());
+    final effectiveOtCode = otCode.trim().isNotEmpty ? otCode : req.description;
 
     await collectPunchesRaw(
       empId: req.employeeId,
       punchTime: punchTimeLocal,
       macAddress: req.macAddress,
       description: req.description,
-      otCode: otCode,
+      otCode: effectiveOtCode,
     );
   }
 
@@ -269,7 +270,9 @@ class TimeClockApi {
       }) async {
     await punch(req, otCode: otCode);
     await Future.delayed(const Duration(milliseconds: 150));
-    return status(req.employeeId, otCode: otCode);
+
+    final effectiveOtCode = otCode.trim().isNotEmpty ? otCode : req.description;
+    return status(req.employeeId, otCode: effectiveOtCode);
   }
 
   // =====================
@@ -281,18 +284,15 @@ class TimeClockApi {
 
     for (final p in batch.punches) {
       try {
-        // IMPORTANT:
-        // queued punches were stored in UTC, but server wants LOCAL tablet time.
         final punchTimeLocal = _isoLocalNoMillis(p.timestampUtc.toLocal());
+        final effectiveOtCode = otCode.trim().isNotEmpty ? otCode : _auditDescription;
 
         await collectPunchesRaw(
           empId: p.employeeId,
           punchTime: punchTimeLocal,
-          // ✅ synced punches should also use the audit MAC/device identity
           macAddress: _auditMacAddress,
-          // ✅ synced punches should write the access code/email into Description
           description: _auditDescription,
-          otCode: otCode,
+          otCode: effectiveOtCode,
         );
 
         accepted.add(p.localSequenceNumber);

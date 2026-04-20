@@ -13,22 +13,10 @@ class MobileAuthService {
   final FlutterAppAuth _appAuth = const FlutterAppAuth();
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
-  // =========================================================
-  // REPLACE THESE WITH YOUR REAL ENTRA VALUES
-  // =========================================================
   static const String clientId = 'YOUR_CLIENT_ID_HERE';
   static const String tenantId = 'YOUR_TENANT_ID_OR_DOMAIN_HERE';
-
-  // Android example:
-  // msauth://com.yourcompany.mobile_timeclock/BASE64_SIGNATURE_HASH
-  //
-  // iOS example:
-  // com.yourcompany.mobiletimeclock:/oauthredirect
-  //
-  // Pick the redirect URI you actually register in Entra.
   static const String redirectUrl = 'YOUR_REDIRECT_URI_HERE';
 
-  // OpenID scopes for sign-in
   static const List<String> scopes = <String>[
     'openid',
     'profile',
@@ -36,7 +24,6 @@ class MobileAuthService {
     'offline_access',
   ];
 
-  //String get _issuer => 'https://login.microsoftonline.com/$tenantId/v2.0';
   String get _discoveryUrl =>
       'https://login.microsoftonline.com/$tenantId/v2.0/.well-known/openid-configuration';
 
@@ -72,7 +59,6 @@ class MobileAuthService {
       }
 
       final claims = _parseJwt(idToken);
-
       final email = _extractEmail(claims);
       final displayName = _extractDisplayName(claims);
 
@@ -86,7 +72,9 @@ class MobileAuthService {
       await _secureStorage.write(key: 'mobile_id_token', value: idToken);
       await _secureStorage.write(key: 'mobile_access_token', value: accessToken);
       await _secureStorage.write(
-          key: 'mobile_refresh_token', value: refreshToken);
+        key: 'mobile_refresh_token',
+        value: refreshToken,
+      );
 
       await DeviceConfigService.configureAsMobile(
         displayName: displayName,
@@ -117,15 +105,13 @@ class MobileAuthService {
 
   Map<String, dynamic> _parseJwt(String token) {
     final parts = token.split('.');
-    if (parts.length != 3) return <String, dynamic>{};
+    if (parts.length != 3) return {};
 
     final payload = parts[1];
     final normalized = base64Url.normalize(payload);
     final decoded = utf8.decode(base64Url.decode(normalized));
 
-    final map = jsonDecode(decoded);
-    if (map is Map<String, dynamic>) return map;
-    return <String, dynamic>{};
+    return jsonDecode(decoded) as Map<String, dynamic>;
   }
 
   String _extractEmail(Map<String, dynamic> claims) {

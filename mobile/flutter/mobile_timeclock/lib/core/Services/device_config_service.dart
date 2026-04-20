@@ -25,12 +25,20 @@ class DeviceConfigService {
   static const String _kAuditMacAddressKey = 'auditMacAddress';
   static const String _kAppVersionLabelKey = 'appVersionLabel';
 
+  // GPS cache keys
+  static const String _kLastLatitudeKey = 'lastLatitude';
+  static const String _kLastLongitudeKey = 'lastLongitude';
+  static const String _kLastAccuracyMetersKey = 'lastAccuracyMeters';
+  static const String _kLastLocationSourceKey = 'lastLocationSource';
+  static const String _kLastLocationCapturedUtcKey = 'lastLocationCapturedUtc';
+
   // Defaults
   static const String defaultBaseUrl = 'https://tcws.tsg.bz/tsgtc.asmx';
   static const String defaultAuthToken = 'PIG0L5PRHXMA0KE5R91YEM7HEY1QM';
   static const String defaultDeviceId = '';
   static const String defaultAuditMacAddress = '02:00:00:00:00:00';
   static const String defaultAppVersionLabel = 'ver 5.0.0 CST';
+  static const String defaultTimeZone = 'America/Chicago';
 
   static Box get _box => Hive.box(boxName);
 
@@ -97,16 +105,42 @@ class DeviceConfigService {
     return v.isNotEmpty ? v : defaultAppVersionLabel;
   }
 
+  static double? get lastLatitude =>
+      (_box.get(_kLastLatitudeKey) as num?)?.toDouble();
+
+  static double? get lastLongitude =>
+      (_box.get(_kLastLongitudeKey) as num?)?.toDouble();
+
+  static double? get lastAccuracyMeters =>
+      (_box.get(_kLastAccuracyMetersKey) as num?)?.toDouble();
+
+  static String get lastLocationSource {
+    final v = (_box.get(_kLastLocationSourceKey) as String?)?.trim() ?? '';
+    return v;
+  }
+
+  static String get lastLocationCapturedUtc {
+    final v =
+        (_box.get(_kLastLocationCapturedUtcKey) as String?)?.trim() ?? '';
+    return v;
+  }
+
   static String get deviceAuditIdentity {
     final mac = auditMacAddress.trim().isEmpty
         ? defaultAuditMacAddress
         : auditMacAddress.trim();
 
+    final lon = lastLongitude;
+    final lat = lastLatitude;
+
+    final lonText = lon == null ? '' : lon.toString();
+    final latText = lat == null ? '' : lat.toString();
+
     final ver = appVersionLabel.trim().isEmpty
         ? defaultAppVersionLabel
         : appVersionLabel.trim();
 
-    return '$mac - $ver';
+    return '$mac;$defaultTimeZone;$lonText;$latText;$ver';
   }
 
   static String get auditDescription {
@@ -199,20 +233,46 @@ class DeviceConfigService {
     await _box.put(_kAppVersionLabelKey, value.trim());
   }
 
+  static Future<void> saveLastKnownLocation({
+    required double latitude,
+    required double longitude,
+    double? accuracyMeters,
+    String locationSource = '',
+    DateTime? capturedUtc,
+  }) async {
+    await _box.put(_kLastLatitudeKey, latitude);
+    await _box.put(_kLastLongitudeKey, longitude);
+
+    if (accuracyMeters != null) {
+      await _box.put(_kLastAccuracyMetersKey, accuracyMeters);
+    } else {
+      await _box.delete(_kLastAccuracyMetersKey);
+    }
+
+    await _box.put(_kLastLocationSourceKey, locationSource.trim());
+
+    final ts = (capturedUtc ?? DateTime.now().toUtc()).toIso8601String();
+    await _box.put(_kLastLocationCapturedUtcKey, ts);
+  }
+
+  static Future<void> clearLastKnownLocation() async {
+    await _box.delete(_kLastLatitudeKey);
+    await _box.delete(_kLastLongitudeKey);
+    await _box.delete(_kLastAccuracyMetersKey);
+    await _box.delete(_kLastLocationSourceKey);
+    await _box.delete(_kLastLocationCapturedUtcKey);
+  }
+
   static Future<void> configureAsWallTablet({
     required String accessCode,
   }) async {
     await setDeviceMode(DeviceMode.wallTablet);
     await setWallTabletAccessCode(accessCode);
     await setDeviceId(accessCode);
+    await setAuditMacAddress(defaultAuditMacAddress);
+    await setAppVersionLabel(defaultAppVersionLabel);
     await setSetupComplete(true);
 
-    // Device Mac Here (One Time)
-    await setAuditMacAddress('02:00:00:00:00:00'); // replace later with real value
-    await setAppVersionLabel('ver 5.0.0 CST');
-    await setSetupComplete(true);
-
-    // Clear mobile state
     await setMobileSignedIn(false);
     await setMobileDisplayName('');
     await setMobileEmail('');
@@ -229,7 +289,6 @@ class DeviceConfigService {
     await setDeviceId(email);
     await setSetupComplete(true);
 
-    // Clear wall tablet state
     await setWallTabletAccessCode('');
   }
 
@@ -256,5 +315,7 @@ class DeviceConfigService {
     await _box.put(_kMobileEmailKey, '');
     await _box.put(_kAuditMacAddressKey, defaultAuditMacAddress);
     await _box.put(_kAppVersionLabelKey, defaultAppVersionLabel);
+
+    await clearLastKnownLocation();
   }
 }

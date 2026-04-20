@@ -11,6 +11,9 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # Web launcher
+  url_launcher: ^6.3.0
+
   # Authentication
   flutter_appauth: ^8.0.3
 

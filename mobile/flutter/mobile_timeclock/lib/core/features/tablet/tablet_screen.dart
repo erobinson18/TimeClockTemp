@@ -29,6 +29,8 @@ import '../../../data/remote/timeclock_api.dart';
 import '../../../widgets/logo_header.dart';
 
 // import '../startup/device_admin_reset_screen.dart';
+import '../startup/device_admin_menu_screen.dart';
+
 
 import'../../../main.dart';
 
@@ -347,7 +349,17 @@ class _TabletScreenState extends State<TabletScreen> {
 
     if (entry == _adminServiceCode) {
       _clearEntry();
-      await _showServiceSettingsDialog();
+
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => DeviceAdminMenuScreen(
+            openServiceSettings: (ctx) async {
+              await _showServiceSettingsDialog();
+            },
+          ),
+        ),
+      );
       return;
     }
 
@@ -458,6 +470,18 @@ class _TabletScreenState extends State<TabletScreen> {
     return "approx";
   }
 
+  Future<void> _cachePositionIfAvailable(Position? pos) async {
+    if (pos == null) return;
+
+    await DeviceConfigService.saveLastKnownLocation(
+      latitude: pos.latitude,
+      longitude: pos.longitude,
+      accuracyMeters: pos.accuracy,
+      locationSource: _locationSourceFromPosition(pos),
+      capturedUtc: pos.timestamp.toUtc(),
+    );
+  }
+
   Future<void> _writePunchLog({
     required String employeeId,
     required String employeeName,
@@ -534,6 +558,8 @@ class _TabletScreenState extends State<TabletScreen> {
     final lng = pos?.longitude;
     final accuracy = pos?.accuracy;
     final locationSource = _locationSourceFromPosition(pos);
+
+    await _cachePositionIfAvailable(pos);
 
     final queuedPayload = <String, dynamic>{
       "employeeId": _employeeGuid!,
