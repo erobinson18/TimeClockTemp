@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -13,16 +14,27 @@ class MobileAuthService {
   final FlutterAppAuth _appAuth = const FlutterAppAuth();
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
-  static const String clientId = 'YOUR_CLIENT_ID_HERE';
-  static const String tenantId = 'YOUR_TENANT_ID_OR_DOMAIN_HERE';
-  static const String redirectUrl = 'YOUR_REDIRECT_URI_HERE';
+  static const String clientId = '2f2431b8-f926-4533-8639-c57af6abb3f5';
+  static const String tenantId = 'f8371d35-d7a9-4fc1-8735-c18315f9d2dd';
+
+  static const String _androidRedirectUrl =
+      'msauth://bz.tsg.databaseresearch/34gd2zWG01PLyIv8dptCGNKSCQ%3D';
+
+  static const String _iosRedirectUrl =
+      'msauth.com.tsg.timekeeper://auth';
 
   static const List<String> scopes = <String>[
     'openid',
     'profile',
     'email',
     'offline_access',
+    'User.Read',
   ];
+
+  String get _redirectUrl {
+    if (Platform.isIOS) return _iosRedirectUrl;
+    return _androidRedirectUrl;
+  }
 
   String get _discoveryUrl =>
       'https://login.microsoftonline.com/$tenantId/v2.0/.well-known/openid-configuration';
@@ -33,7 +45,7 @@ class MobileAuthService {
       await _appAuth.authorizeAndExchangeCode(
         AuthorizationTokenRequest(
           clientId,
-          redirectUrl,
+          _redirectUrl,
           discoveryUrl: _discoveryUrl,
           scopes: scopes,
           promptValues: const ['select_account'],
@@ -69,6 +81,13 @@ class MobileAuthService {
         );
       }
 
+      if (!email.toLowerCase().endsWith('@tsg.bz')) {
+        return const MobileSsoResult(
+          ok: false,
+          message: 'You must sign in with your @tsg.bz account.',
+        );
+      }
+
       await _secureStorage.write(key: 'mobile_id_token', value: idToken);
       await _secureStorage.write(key: 'mobile_access_token', value: accessToken);
       await _secureStorage.write(
@@ -77,7 +96,7 @@ class MobileAuthService {
       );
 
       await DeviceConfigService.configureAsMobile(
-        displayName: displayName,
+        displayName: displayName.isEmpty ? email : displayName,
         email: email,
       );
 

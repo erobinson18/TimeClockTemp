@@ -1,25 +1,17 @@
 import 'package:flutter/material.dart';
 
 class LogoHeader extends StatelessWidget {
-  /// Height as a fraction of screen height.
-  /// Example: 0.20 = 20% of height.
   final double heightFactor;
-
-  /// Optional padding around the logo.
   final EdgeInsets padding;
-
-  /// Optional max height cap (helps on very large tablets).
   final double maxHeight;
-
-  /// Optional min height cap (helps on smaller screens).
   final double minHeight;
 
   const LogoHeader({
     super.key,
-    this.heightFactor = 0.20,
+    this.heightFactor = 0.24, // about 20% bigger than before
     this.padding = const EdgeInsets.only(top: 10, left: 12, right: 12),
-    this.maxHeight = 240,
-    this.minHeight = 80,
+    this.maxHeight = 290,
+    this.minHeight = 96,
   });
 
   @override
