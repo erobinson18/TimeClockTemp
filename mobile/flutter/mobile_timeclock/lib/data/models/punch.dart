@@ -1,29 +1,25 @@
 class PunchRequest {
-  final String employeeId; // GUID string
-  final int punchType; // 1 for clock-in, 2 for clock-out
-  final int deviceType; // 1=Android/Web
-  final String deviceId;
-  final int localSequenceNumber;
-  final double? latitude;
-  final double? longitude;
+  final String employeeId;
 
-  PunchRequest({
+  // Kept for UI logic; backend doesn’t require it but we keep it for your app.
+  final int punchType;
+
+  final int deviceType;
+  final String deviceId;
+  final String macAddress;
+  final String description;
+
+  final int localSequenceNumber;
+  final DateTime timestampUtc;
+
+  const PunchRequest({
     required this.employeeId,
     required this.punchType,
     required this.deviceType,
     required this.deviceId,
+    required this.macAddress,
+    required this.description,
     required this.localSequenceNumber,
-    this.latitude,
-    this.longitude,
+    required this.timestampUtc,
   });
-
-  Map<String, dynamic> toJson() => {
-        'employeeId': employeeId,
-        'punchType': punchType,
-        'deviceType': deviceType,
-        'deviceId': deviceId,
-        'localSequenceNumber': localSequenceNumber,
-        'latitude': latitude,
-        'longitude': longitude,
-      };
 }

@@ -1,19 +1,15 @@
-class VerifyRequest {
-  final String employeeId;
-  VerifyRequest({required this.employeeId});
-  Map<String, dynamic> toJson() => {'employeeId': employeeId};
-}
-
 class VerifyResponse {
   final bool isValid;
   final String? employeeId;
-  final String? displayName;
+  final String? employeeNumber;
+  final String? fullName;
+  final bool isClockedIn;
 
-  VerifyResponse({required this.isValid, this.employeeId, this.displayName});
-
-  factory VerifyResponse.fromJson(Map<String, dynamic> json) => VerifyResponse(
-      isValid: json['isValid'] as bool,
-      employeeId: json['employeeId'] as String?,
-      displayName: json['displayName'] as String?,
-    );
+  const VerifyResponse({
+    required this.isValid,
+    required this.employeeId,
+    required this.employeeNumber,
+    required this.fullName,
+    required this.isClockedIn,
+  });
 }
