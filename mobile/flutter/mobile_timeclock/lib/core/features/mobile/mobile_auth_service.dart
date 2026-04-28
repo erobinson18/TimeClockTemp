@@ -18,7 +18,7 @@ class MobileAuthService {
   static const String tenantId = 'f8371d35-d7a9-4fc1-8735-c18315f9d2dd';
 
   static const String _androidRedirectUrl =
-      'msauth://bz.tsg.databaseresearch/34gd2zWG01PLyIv8dptCGNKSCQ%3D';
+      'msauth://bz.tsg.databaseresearch/34gd2zWG0l1PLylv8dptCGNkSCQ%3D                                                                                                                                                                                                                                                                                                           ';
 
   static const String _iosRedirectUrl =
       'msauth.com.tsg.timekeeper://auth';

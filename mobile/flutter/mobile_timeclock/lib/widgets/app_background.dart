@@ -5,7 +5,7 @@ class AppBackground extends StatelessWidget {
 
   const AppBackground({
     super.key,
-    this.overlayOpacity = 0.60,
+    this.overlayOpacity = 0.65,
   });
 
   @override
@@ -27,9 +27,9 @@ class AppBackground extends StatelessWidget {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Colors.black.withValues(alpha: 0.22),
-                Colors.black.withValues(alpha: 0.10),
-                Colors.black.withValues(alpha: 0.34),
+                Colors.black.withValues(alpha: 0.20),
+                Colors.black.withValues(alpha: 0.08),
+                Colors.black.withValues(alpha: 0.36),
               ],
             ),
           ),

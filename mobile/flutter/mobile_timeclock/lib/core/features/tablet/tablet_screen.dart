@@ -15,10 +15,10 @@ import '../../Services/device_config_service.dart';
 import '../../services/heartbeat_service.dart';
 
 import '../../../data/local/local_seq_store.dart';
+import '../../../data/local/punch_log_store.dart';
 import '../../../data/local/punch_queue.dart';
 import '../../../data/local/roster_cache.dart';
 import '../../../data/local/status_cache.dart';
-import '../../../data/local/punch_log_store.dart';
 
 import '../../../data/models/punch.dart';
 import '../../../data/models/status.dart';
@@ -26,13 +26,12 @@ import '../../../data/models/sync.dart';
 import '../../../data/models/verify.dart';
 import '../../../data/remote/timeclock_api.dart';
 
+import '../../../widgets/app_background.dart';
 import '../../../widgets/logo_header.dart';
 
-// import '../startup/device_admin_reset_screen.dart';
 import '../startup/device_admin_menu_screen.dart';
 
-
-import'../../../main.dart';
+import '../../../main.dart';
 
 class TabletScreen extends StatefulWidget {
   const TabletScreen({super.key});
@@ -776,7 +775,8 @@ class _TabletScreenState extends State<TabletScreen> {
                 const SizedBox(height: 12),
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
                     color: Colors.red.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(14),
@@ -848,7 +848,6 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
-
   Future<T?> _showAppDialog<T>({
     required String title,
     required Widget content,
@@ -919,10 +918,12 @@ class _TabletScreenState extends State<TabletScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: actions
-                          .map((w) => Padding(
-                        padding: const EdgeInsets.only(left: 10),
-                        child: w,
-                      ))
+                          .map(
+                            (w) => Padding(
+                          padding: const EdgeInsets.only(left: 10),
+                          child: w,
+                        ),
+                      )
                           .toList(),
                     ),
                   ],
@@ -1033,10 +1034,12 @@ class _TabletScreenState extends State<TabletScreen> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: (isError ? Colors.red : Colors.green).withValues(alpha: 0.12),
+                color: (isError ? Colors.red : Colors.green)
+                    .withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: (isError ? Colors.red : Colors.green).withValues(alpha: 0.35),
+                  color: (isError ? Colors.red : Colors.green)
+                      .withValues(alpha: 0.35),
                   width: 2,
                 ),
               ),
@@ -1166,7 +1169,6 @@ class _TabletScreenState extends State<TabletScreen> {
       actions: const [],
     );
   }
-
 
   String _buildPunchLogCsv(List<Map<String, dynamic>> rows) {
     final header = [
@@ -1379,7 +1381,8 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(14),
@@ -1467,7 +1470,8 @@ class _TabletScreenState extends State<TabletScreen> {
                   child: ListView.separated(
                     padding: const EdgeInsets.all(10),
                     itemCount: items.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    separatorBuilder: (_, __) =>
+                    const SizedBox(height: 8),
                     itemBuilder: (_, i) {
                       final m = items[i];
 
@@ -1475,7 +1479,8 @@ class _TabletScreenState extends State<TabletScreen> {
                         (m["timestampUtc"] ?? "").toString(),
                       );
                       final empId = (m["employeeId"] ?? "").toString();
-                      final empName = (m["employeeName"] ?? "").toString();
+                      final empName =
+                      (m["employeeName"] ?? "").toString();
                       final status =
                       (m["status"] ?? "").toString().toUpperCase();
                       final lat = (m["latitude"] as num?)?.toDouble();
@@ -1530,7 +1535,8 @@ class _TabletScreenState extends State<TabletScreen> {
                               child: Text(
                                 ts.isEmpty ? "(unknown)" : ts,
                                 style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.88),
+                                  color:
+                                  Colors.white.withValues(alpha: 0.88),
                                   fontWeight: FontWeight.w800,
                                   fontSize: 11,
                                   height: 1.25,
@@ -1542,7 +1548,8 @@ class _TabletScreenState extends State<TabletScreen> {
                               child: Text(
                                 "${empName.isEmpty ? "(unknown)" : empName}\n$empId",
                                 style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.88),
+                                  color:
+                                  Colors.white.withValues(alpha: 0.88),
                                   fontWeight: FontWeight.w800,
                                   fontSize: 11,
                                   height: 1.25,
@@ -1560,7 +1567,8 @@ class _TabletScreenState extends State<TabletScreen> {
                                   ),
                                   decoration: BoxDecoration(
                                     color: statusBg,
-                                    borderRadius: BorderRadius.circular(999),
+                                    borderRadius:
+                                    BorderRadius.circular(999),
                                     border: Border.all(
                                       color: statusBorder,
                                       width: 1.5,
@@ -1583,7 +1591,8 @@ class _TabletScreenState extends State<TabletScreen> {
                               child: Text(
                                 latLngText,
                                 style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.78),
+                                  color:
+                                  Colors.white.withValues(alpha: 0.78),
                                   fontWeight: FontWeight.w800,
                                   fontSize: 11,
                                   height: 1.25,
@@ -1666,8 +1675,15 @@ class _TabletScreenState extends State<TabletScreen> {
       canPop: false,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final scale =
-          (constraints.maxWidth / 1600.0).clamp(0.78, 1.0).toDouble();
+          final isPhone = constraints.maxWidth < 900;
+          final isDesktop = constraints.maxWidth > 1500;
+
+          final scale = isPhone
+              ? (constraints.maxWidth / 780.0).clamp(0.70, 0.86).toDouble()
+              : isDesktop
+              ? (constraints.maxWidth / 1700.0).clamp(0.95, 1.08).toDouble()
+              : (constraints.maxWidth / 1600.0).clamp(0.78, 1.0).toDouble();
+
           double s(double v) => v * scale;
 
           final timeStr = _formatTime(_now);
@@ -1679,139 +1695,164 @@ class _TabletScreenState extends State<TabletScreen> {
           final canVerify = _ready && !_verifying && !_punching;
           final canPunch = _ready && _verified && !_verifying && !_punching;
 
+          final mainContent = isPhone
+              ? Column(
+            children: [
+              _buildLeftPanel(canVerify, s),
+              SizedBox(height: s(18)),
+              _buildRightPanel(
+                s: s,
+                timeStr: timeStr,
+                dateStr: dateStr,
+                actionText: actionText,
+                actionColor: actionColor,
+                canPunch: canPunch,
+              ),
+            ],
+          )
+              : Row(
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  minWidth: s(320),
+                  maxWidth: s(400),
+                ),
+                child: _buildLeftPanel(canVerify, s),
+              ),
+              SizedBox(width: s(24)),
+              Expanded(
+                child: _buildRightPanel(
+                  s: s,
+                  timeStr: timeStr,
+                  dateStr: dateStr,
+                  actionText: actionText,
+                  actionColor: actionColor,
+                  canPunch: canPunch,
+                ),
+              ),
+            ],
+          );
+
           return Scaffold(
             backgroundColor: Colors.black,
-            body: SafeArea(
-              child: Stack(
-                children: [
-                  Padding(
+            resizeToAvoidBottomInset: true,
+            body: Stack(
+              children: [
+                const AppBackground(overlayOpacity: 0.68),
+                SafeArea(
+                  child: SingleChildScrollView(
+                    keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
                     padding: EdgeInsets.all(s(24)),
-                    child: Row(
-                      children: [
-                        ConstrainedBox(
-                          constraints: BoxConstraints(
-                            minWidth: s(320),
-                            maxWidth: s(400),
-                          ),
-                          child: _buildLeftPanel(canVerify, s),
-                        ),
-                        SizedBox(width: s(24)),
-                        Expanded(
-                          child: _buildRightPanel(
-                            s: s,
-                            timeStr: timeStr,
-                            dateStr: dateStr,
-                            actionText: actionText,
-                            actionColor: actionColor,
-                            canPunch: canPunch,
-                          ),
-                        ),
-                      ],
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight - s(48),
+                      ),
+                      child: mainContent,
                     ),
                   ),
-                  Positioned(
-                    left: s(24),
-                    top: s(10),
-                    child: !_ready || _heartbeat == null
-                        ? Row(
-                      children: [
-                        Container(
-                          width: s(10),
-                          height: s(10),
-                          decoration: const BoxDecoration(
-                            color: Colors.orange,
-                            shape: BoxShape.circle,
-                          ),
+                ),
+                Positioned(
+                  left: s(24),
+                  top: s(10),
+                  child: !_ready || _heartbeat == null
+                      ? Row(
+                    children: [
+                      Container(
+                        width: s(10),
+                        height: s(10),
+                        decoration: const BoxDecoration(
+                          color: Colors.orange,
+                          shape: BoxShape.circle,
                         ),
-                        SizedBox(width: s(8)),
-                        Text(
-                          "INITIALIZING…",
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.80),
-                            fontSize: s(12),
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: s(1),
-                          ),
+                      ),
+                      SizedBox(width: s(8)),
+                      Text(
+                        "INITIALIZING…",
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.80),
+                          fontSize: s(12),
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: s(1),
                         ),
-                      ],
-                    )
-                        : ValueListenableBuilder<bool>(
-                      valueListenable: _heartbeat!.online,
-                      builder: (context, online, _) {
-                        final dotColor =
-                        online ? Colors.green : Colors.red;
-                        final text = _lastSyncAttemptLocal == null
-                            ? "Pending offline punches: $_pendingCount"
-                            : "Last Sync Attempt: ${_formatSyncStamp(_lastSyncAttemptLocal!)}   |   Pending: $_pendingCount";
+                      ),
+                    ],
+                  )
+                      : ValueListenableBuilder<bool>(
+                    valueListenable: _heartbeat!.online,
+                    builder: (context, online, _) {
+                      final dotColor =
+                      online ? Colors.green : Colors.red;
+                      final text = _lastSyncAttemptLocal == null
+                          ? "Pending offline punches: $_pendingCount"
+                          : "Last Sync Attempt: ${_formatSyncStamp(_lastSyncAttemptLocal!)}   |   Pending: $_pendingCount";
 
-                        return Row(
-                          children: [
-                            Container(
-                              width: s(10),
-                              height: s(10),
-                              decoration: BoxDecoration(
-                                color: dotColor,
-                                shape: BoxShape.circle,
-                              ),
+                      return Row(
+                        children: [
+                          Container(
+                            width: s(10),
+                            height: s(10),
+                            decoration: BoxDecoration(
+                              color: dotColor,
+                              shape: BoxShape.circle,
                             ),
-                            SizedBox(width: s(8)),
-                            Text(
-                              online ? "ONLINE" : "OFFLINE",
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.80),
-                                fontSize: s(12),
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: s(1),
-                              ),
+                          ),
+                          SizedBox(width: s(8)),
+                          Text(
+                            online ? "ONLINE" : "OFFLINE",
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.80),
+                              fontSize: s(12),
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: s(1),
                             ),
+                          ),
+                          if (!isPhone) ...[
                             SizedBox(width: s(18)),
                             Text(
                               text,
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.75),
+                                color:
+                                Colors.white.withValues(alpha: 0.75),
                                 fontSize: s(12),
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
                           ],
-                        );
-                      },
-                    ),
+                        ],
+                      );
+                    },
                   ),
-                  Positioned(
-                    right: s(24),
-                    top: s(10),
-                    child: Row(
-                      children: [
-                        TextButton(
-                          onPressed:
-                          !_ready ? null : () => _trySync(forceOnline: true),
-                          child: Text(
-                            "Sync Now",
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.75),
-                              fontSize: s(12),
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Positioned(
-                    right: s(24),
-                    bottom: s(8),
+                ),
+                Positioned(
+                  right: s(24),
+                  top: s(10),
+                  child: TextButton(
+                    onPressed:
+                    !_ready ? null : () => _trySync(forceOnline: true),
                     child: Text(
-                      "ver 5.0.0",
+                      "Sync Now",
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.55),
+                        color: Colors.white.withValues(alpha: 0.75),
                         fontSize: s(12),
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+                Positioned(
+                  right: s(24),
+                  bottom: s(8),
+                  child: Text(
+                    "ver 5.0.0",
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.55),
+                      fontSize: s(12),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
           );
         },
@@ -1823,14 +1864,22 @@ class _TabletScreenState extends State<TabletScreen> {
     return Container(
       padding: EdgeInsets.all(s(18)),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
+        color: Colors.black.withValues(alpha: 0.46),
         borderRadius: BorderRadius.circular(s(22)),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.15),
           width: s(2),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.35),
+            blurRadius: s(18),
+            spreadRadius: s(1),
+          ),
+        ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             height: s(64),
@@ -1869,38 +1918,6 @@ class _TabletScreenState extends State<TabletScreen> {
           ),
           SizedBox(height: s(14)),
           _buildKeypad(s),
-          SizedBox(height: s(14)),
-          SizedBox(
-            width: double.infinity,
-            height: s(56),
-            child: ElevatedButton(
-              onPressed: canVerify ? _verifyEmployee : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white.withValues(alpha: 0.14),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(s(16)),
-                  side: BorderSide(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    width: s(2),
-                  ),
-                ),
-              ),
-              child: _verifying
-                  ? SizedBox(
-                width: s(20),
-                height: s(20),
-                child: const CircularProgressIndicator(strokeWidth: 2),
-              )
-                  : Text(
-                "VERIFY",
-                style: TextStyle(
-                  fontSize: s(18),
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -1919,12 +1936,19 @@ class _TabletScreenState extends State<TabletScreen> {
     return Container(
       padding: EdgeInsets.all(s(22)),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
+        color: Colors.black.withValues(alpha: 0.46),
         borderRadius: BorderRadius.circular(s(22)),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.15),
           width: s(2),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.35),
+            blurRadius: s(18),
+            spreadRadius: s(1),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2005,7 +2029,9 @@ class _TabletScreenState extends State<TabletScreen> {
                   ),
                   SizedBox(height: s(6)),
                   Text(
-                    _clockedIn ? "You are currently IN" : "You are currently OUT",
+                    _clockedIn
+                        ? "You are currently IN"
+                        : "You are currently OUT",
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.85),
@@ -2045,7 +2071,8 @@ class _TabletScreenState extends State<TabletScreen> {
                       ? SizedBox(
                     width: s(28),
                     height: s(28),
-                    child: const CircularProgressIndicator(strokeWidth: 3),
+                    child:
+                    const CircularProgressIndicator(strokeWidth: 3),
                   )
                       : Text(
                     actionText,
@@ -2120,13 +2147,15 @@ class _TabletScreenState extends State<TabletScreen> {
   Widget _keypadRow(List<String> labels, double Function(double) s) {
     return Row(
       children: labels
-          .map((l) => Expanded(
-        child: _keyButton(
-          label: l,
-          onTap: () => _appendDigit(l),
-          s: s,
+          .map(
+            (l) => Expanded(
+          child: _keyButton(
+            label: l,
+            onTap: () => _appendDigit(l),
+            s: s,
+          ),
         ),
-      ))
+      )
           .toList(),
     );
   }
