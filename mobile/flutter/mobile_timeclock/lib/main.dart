@@ -11,16 +11,16 @@ import 'core/features/verify/verify_screen.dart';
 import 'core/features/status/status_screen.dart';
 
 class Routes {
-  static const String startup = '/';
-  static const String tablet = '/tablet';
+  static const String startup = '/startup';
+  static const String tablet = '/';
   static const String verify = '/verify';
   static const String status = '/status';
 }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Hive.initFlutter();
 
+  await Hive.initFlutter();
   await SecureHive.init();
 
   await Hive.openBox('device', encryptionCipher: SecureHive.cipher);
@@ -29,10 +29,8 @@ Future<void> main() async {
   await Hive.openBox('status_cache', encryptionCipher: SecureHive.cipher);
   await Hive.openBox('punch_log', encryptionCipher: SecureHive.cipher);
 
-  await SystemChrome.setPreferredOrientations(const [
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
+  // Allow the UI to adapt for phones, tablets, laptops, and web.
+  await SystemChrome.setPreferredOrientations(const []);
 
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
@@ -45,7 +43,14 @@ class TimeClockApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      title: 'TSG Time Clock',
       debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: Colors.black,
+        useMaterial3: true,
+        fontFamily: 'Roboto',
+      ),
       initialRoute: Routes.startup,
       onGenerateRoute: (settings) {
         switch (settings.name) {
@@ -69,10 +74,13 @@ class TimeClockApp extends StatelessWidget {
             if (guid == null || guid.trim().isEmpty) {
               return MaterialPageRoute(
                 builder: (_) => const Scaffold(
-                  body: Center(child: Text("Missing employee GUID")),
+                  body: Center(
+                    child: Text('Missing employee GUID'),
+                  ),
                 ),
               );
             }
+
             return MaterialPageRoute(
               builder: (_) => StatusScreen(employeeGuid: guid),
             );
@@ -80,7 +88,9 @@ class TimeClockApp extends StatelessWidget {
           default:
             return MaterialPageRoute(
               builder: (_) => const Scaffold(
-                body: Center(child: Text("Route not found")),
+                body: Center(
+                  child: Text('Route not found'),
+                ),
               ),
             );
         }

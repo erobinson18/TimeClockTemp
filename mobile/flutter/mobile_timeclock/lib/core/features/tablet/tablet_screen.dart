@@ -29,6 +29,7 @@ import '../../../data/remote/timeclock_api.dart';
 import '../../../widgets/app_background.dart';
 import '../../../widgets/logo_header.dart';
 
+import '../mobile/mobile_auth_service.dart';
 import '../startup/device_admin_menu_screen.dart';
 
 import '../../../main.dart';
@@ -53,7 +54,7 @@ class _TabletScreenState extends State<TabletScreen> {
   final _connectivity = Connectivity();
   final _seqStore = LocalSeqStore();
 
-  String _employeeNumber = "";
+  String _employeeNumber = '';
   bool _verifying = false;
   bool _punching = false;
 
@@ -73,8 +74,8 @@ class _TabletScreenState extends State<TabletScreen> {
   DateTime _now = DateTime.now();
   DateTime? _lastSyncAttemptLocal;
 
-  static const String _adminServiceCode = "009876";
-  static const String _adminPunchLogCode = "101010";
+  static const String _adminServiceCode = '009876';
+  static const String _adminPunchLogCode = '101010';
 
   static const Duration _serverDownGrace = Duration(minutes: 2);
   DateTime? _serverDownUntilUtc;
@@ -115,7 +116,7 @@ class _TabletScreenState extends State<TabletScreen> {
   void _handleClearPressed() {
     HapticFeedback.selectionClick();
 
-    final hasName = (_fullName ?? "").trim().isNotEmpty;
+    final hasName = (_fullName ?? '').trim().isNotEmpty;
     if (_verified || hasName) {
       _resetSession();
     } else {
@@ -157,11 +158,12 @@ class _TabletScreenState extends State<TabletScreen> {
         const Duration(seconds: 30),
             (_) => _trySync(),
       );
+
       _trySync();
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _message = "Init failed: $e";
+        _message = 'Init failed: $e';
         _ready = false;
       });
     }
@@ -204,7 +206,7 @@ class _TabletScreenState extends State<TabletScreen> {
   void _clearEntry() {
     HapticFeedback.selectionClick();
     setState(() {
-      _employeeNumber = "";
+      _employeeNumber = '';
       _message = null;
     });
   }
@@ -214,7 +216,7 @@ class _TabletScreenState extends State<TabletScreen> {
 
     if (!mounted) return;
     setState(() {
-      _employeeNumber = "";
+      _employeeNumber = '';
       _verified = false;
       _employeeGuid = null;
       _fullName = null;
@@ -273,7 +275,7 @@ class _TabletScreenState extends State<TabletScreen> {
         if (forceOnline && mounted) {
           setState(() {
             _message =
-            "Offline: cannot sync right now. (${_serverInGraceWindow ? "Server grace window" : "No connection"})";
+            'Offline: cannot sync right now. (${_serverInGraceWindow ? "Server grace window" : "No connection"})';
           });
         }
         return;
@@ -283,18 +285,18 @@ class _TabletScreenState extends State<TabletScreen> {
       if (pending.isEmpty) return;
 
       final punches = pending.map((p) {
-        final punchType = (p["punchType"] as num?)?.toInt() ?? 0;
-        final localSeq = (p["localSequenceNumber"] as num?)?.toInt() ?? 0;
-        final ts = (p["timestampUtc"] as String?) ??
+        final punchType = (p['punchType'] as num?)?.toInt() ?? 0;
+        final localSeq = (p['localSequenceNumber'] as num?)?.toInt() ?? 0;
+        final ts = (p['timestampUtc'] as String?) ??
             DateTime.now().toUtc().toIso8601String();
 
         return SyncPunch(
-          employeeId: (p["employeeId"] as String?) ?? "",
+          employeeId: (p['employeeId'] as String?) ?? '',
           punchType: punchType,
           localSequenceNumber: localSeq,
           timestampUtc: DateTime.parse(ts),
-          latitude: (p["latitude"] as num?)?.toDouble(),
-          longitude: (p["longitude"] as num?)?.toDouble(),
+          latitude: (p['latitude'] as num?)?.toDouble(),
+          longitude: (p['longitude'] as num?)?.toDouble(),
         );
       }).toList();
 
@@ -310,7 +312,7 @@ class _TabletScreenState extends State<TabletScreen> {
       await _refreshPending();
 
       if (!mounted) return;
-      setState(() => _message = "Synced ${result.processed} punch(es).");
+      setState(() => _message = 'Synced ${result.processed} punch(es).');
 
       if (_employeeGuid != null && _employeeGuid!.trim().isNotEmpty) {
         await _loadStatus(_employeeGuid!);
@@ -335,14 +337,14 @@ class _TabletScreenState extends State<TabletScreen> {
 
   Future<void> _verifyEmployee() async {
     if (!_ready || _api == null) {
-      setState(() => _message = "Initializing… try again in a moment.");
+      setState(() => _message = 'Initializing… try again in a moment.');
       return;
     }
 
     final entry = _employeeNumber.trim();
 
     if (entry.isEmpty) {
-      setState(() => _message = "Enter your Employee ID.");
+      setState(() => _message = 'Enter your Employee ID.');
       return;
     }
 
@@ -381,7 +383,7 @@ class _TabletScreenState extends State<TabletScreen> {
 
       final cached = await _rosterCache.findByEmployeeNumber(entry);
       if (cached == null) {
-        if (mounted) setState(() => _message = "Invalid Employee ID.");
+        if (mounted) setState(() => _message = 'Invalid Employee ID.');
         return;
       }
 
@@ -396,7 +398,7 @@ class _TabletScreenState extends State<TabletScreen> {
           fullName: cached.fullName,
           isClockedIn: cachedClockedIn,
         ),
-        message: online ? "Verified." : "Verified (offline).",
+        message: online ? 'Verified.' : 'Verified (offline).',
       );
 
       await _statusCache.setIsClockedIn(cached.employeeId, cachedClockedIn);
@@ -405,7 +407,7 @@ class _TabletScreenState extends State<TabletScreen> {
         await _loadStatus(cached.employeeId);
       }
     } catch (_) {
-      if (mounted) setState(() => _message = "Verify failed.");
+      if (mounted) setState(() => _message = 'Verify failed.');
     } finally {
       if (mounted) setState(() => _verifying = false);
     }
@@ -461,12 +463,12 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   String _locationSourceFromPosition(Position? pos) {
-    if (pos == null) return "none";
+    if (pos == null) return 'none';
 
     final accuracy = pos.accuracy;
-    if (accuracy <= 25) return "gps";
-    if (accuracy <= 100) return "network";
-    return "approx";
+    if (accuracy <= 25) return 'gps';
+    if (accuracy <= 100) return 'network';
+    return 'approx';
   }
 
   Future<void> _cachePositionIfAvailable(Position? pos) async {
@@ -494,18 +496,18 @@ class _TabletScreenState extends State<TabletScreen> {
     required String outcome,
   }) async {
     await _log.add({
-      "timestampUtc": timestampUtc,
-      "employeeId": employeeId,
-      "employeeName": employeeName,
-      "punchType": punchType,
-      "status": (punchType == 0) ? "IN" : "OUT",
-      "localSequenceNumber": localSeq,
-      "latitude": lat,
-      "longitude": lng,
-      "accuracyMeters": accuracyMeters,
-      "locationSource": locationSource,
-      "outcome": outcome,
-      "deviceId": _deviceId,
+      'timestampUtc': timestampUtc,
+      'employeeId': employeeId,
+      'employeeName': employeeName,
+      'punchType': punchType,
+      'status': (punchType == 0) ? 'IN' : 'OUT',
+      'localSequenceNumber': localSeq,
+      'latitude': lat,
+      'longitude': lng,
+      'accuracyMeters': accuracyMeters,
+      'locationSource': locationSource,
+      'outcome': outcome,
+      'deviceId': _deviceId,
     });
   }
 
@@ -530,12 +532,12 @@ class _TabletScreenState extends State<TabletScreen> {
 
   Future<void> _doPunch() async {
     if (!_ready || _api == null) {
-      setState(() => _message = "Initializing… try again in a moment.");
+      setState(() => _message = 'Initializing… try again in a moment.');
       return;
     }
 
     if (!_verified || _employeeGuid == null || _employeeGuid!.trim().isEmpty) {
-      setState(() => _message = "Verify first.");
+      setState(() => _message = 'Verify first.');
       return;
     }
 
@@ -561,20 +563,20 @@ class _TabletScreenState extends State<TabletScreen> {
     await _cachePositionIfAvailable(pos);
 
     final queuedPayload = <String, dynamic>{
-      "employeeId": _employeeGuid!,
-      "punchType": punchType,
-      "localSequenceNumber": seq,
-      "timestampUtc": tsUtcNoMillis,
-      "latitude": lat,
-      "longitude": lng,
-      "accuracyMeters": accuracy,
-      "locationSource": locationSource,
+      'employeeId': _employeeGuid!,
+      'punchType': punchType,
+      'localSequenceNumber': seq,
+      'timestampUtc': tsUtcNoMillis,
+      'latitude': lat,
+      'longitude': lng,
+      'accuracyMeters': accuracy,
+      'locationSource': locationSource,
     };
 
     final newClockedIn = (punchType == 0);
 
     final nameForLog =
-    (_fullName ?? "").trim().isEmpty ? "(unknown)" : _fullName!.trim();
+    (_fullName ?? '').trim().isEmpty ? '(unknown)' : _fullName!.trim();
 
     try {
       final online = await _isOnline();
@@ -593,14 +595,14 @@ class _TabletScreenState extends State<TabletScreen> {
           lng: lng,
           accuracyMeters: accuracy,
           locationSource: locationSource,
-          outcome: "OFFLINE_QUEUED",
+          outcome: 'OFFLINE_QUEUED',
         );
 
         if (!mounted) return;
         setState(() {
-          _message = "Offline: Punch queued ($_pendingCount pending)."
-              "${pos == null ? " (Location unavailable)" : ""}"
-              "${_serverInGraceWindow ? " (Server unreachable)" : ""}";
+          _message = 'Offline: Punch queued ($_pendingCount pending).'
+              '${pos == null ? " (Location unavailable)" : ""}'
+              '${_serverInGraceWindow ? " (Server unreachable)" : ""}';
         });
 
         await Future.delayed(const Duration(seconds: 1));
@@ -632,13 +634,13 @@ class _TabletScreenState extends State<TabletScreen> {
         lng: lng,
         accuracyMeters: accuracy,
         locationSource: locationSource,
-        outcome: "ONLINE_OK",
+        outcome: 'ONLINE_OK',
       );
 
       await _finishPunchAndReset(
         newClockedInState: newClockedIn,
         successMessage:
-        newClockedIn ? "Clock In recorded." : "Clock Out recorded.",
+        newClockedIn ? 'Clock In recorded.' : 'Clock Out recorded.',
       );
     } catch (_) {
       _markServerDown();
@@ -656,12 +658,12 @@ class _TabletScreenState extends State<TabletScreen> {
         lng: lng,
         accuracyMeters: accuracy,
         locationSource: locationSource,
-        outcome: "ERROR_QUEUED",
+        outcome: 'ERROR_QUEUED',
       );
 
       if (!mounted) return;
       setState(() {
-        _message = "Server unreachable: Punch queued ($_pendingCount pending).";
+        _message = 'Server unreachable: Punch queued ($_pendingCount pending).';
       });
 
       await Future.delayed(const Duration(seconds: 1));
@@ -693,11 +695,11 @@ class _TabletScreenState extends State<TabletScreen> {
     final url = baseUrl.trim();
     final auth = authToken.trim();
 
-    if (url.isEmpty) return (ok: false, message: "Base URL is required.");
-    if (auth.isEmpty) return (ok: false, message: "Auth token is required.");
+    if (url.isEmpty) return (ok: false, message: 'Base URL is required.');
+    if (auth.isEmpty) return (ok: false, message: 'Auth token is required.');
 
     if (!await _hasNetworkLink()) {
-      return (ok: true, message: "Saved offline. Will verify when online.");
+      return (ok: true, message: 'Saved offline. Will verify when online.');
     }
 
     try {
@@ -713,7 +715,7 @@ class _TabletScreenState extends State<TabletScreen> {
       if (value.trim().isEmpty) {
         return (
         ok: false,
-        message: "Server responded, but returned an empty value."
+        message: 'Server responded, but returned an empty value.'
         );
       }
 
@@ -722,13 +724,13 @@ class _TabletScreenState extends State<TabletScreen> {
       if (looksLikeHtml) {
         return (
         ok: false,
-        message: "Endpoint looks wrong (HTML response). Check the .asmx path."
+        message: 'Endpoint looks wrong (HTML response). Check the .asmx path.'
         );
       }
 
-      return (ok: true, message: "Verified and saved.");
+      return (ok: true, message: 'Verified and saved.');
     } catch (e) {
-      return (ok: false, message: "Verify failed: $e");
+      return (ok: false, message: 'Verify failed: $e');
     }
   }
 
@@ -738,7 +740,7 @@ class _TabletScreenState extends State<TabletScreen> {
     bool busy = false;
 
     final ok = await _showAppDialog<bool>(
-      title: "Logout / Reset Device",
+      title: 'Logout / Reset Device',
       width: 560,
       dismissible: true,
       content: StatefulBuilder(
@@ -747,8 +749,8 @@ class _TabletScreenState extends State<TabletScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                "Are you sure you want to log out this device and return to the startup screen?\n\n"
-                    "To confirm, enter the admin code again.",
+                'Are you sure you want to log out this device and return to the startup screen?\n\n'
+                    'To confirm, enter the admin code again.',
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.86),
                   fontWeight: FontWeight.w700,
@@ -758,13 +760,13 @@ class _TabletScreenState extends State<TabletScreen> {
               const SizedBox(height: 14),
               _darkTextField(
                 controller: codeCtrl,
-                label: "Re-enter Admin Code",
-                hint: "009876",
+                label: 'Re-enter Admin Code',
+                hint: '009876',
                 inputType: TextInputType.number,
                 onSubmitted: (_) async {
                   final code = codeCtrl.text.trim();
                   if (code != _adminServiceCode) {
-                    setLocal(() => inlineError = "Incorrect admin code.");
+                    setLocal(() => inlineError = 'Incorrect admin code.');
                     return;
                   }
                   if (!mounted) return;
@@ -799,20 +801,20 @@ class _TabletScreenState extends State<TabletScreen> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   _dialogButton(
-                    label: "Cancel",
+                    label: 'Cancel',
                     filled: false,
                     busy: busy,
                     onTap: () => Navigator.of(ctx).pop(false),
                   ),
                   const SizedBox(width: 10),
                   _dialogButton(
-                    label: "Yes, Logout",
+                    label: 'Yes, Logout',
                     filled: true,
                     busy: busy,
                     onTap: () async {
                       final code = codeCtrl.text.trim();
                       if (code != _adminServiceCode) {
-                        setLocal(() => inlineError = "Incorrect admin code.");
+                        setLocal(() => inlineError = 'Incorrect admin code.');
                         return;
                       }
                       setLocal(() => busy = true);
@@ -834,6 +836,7 @@ class _TabletScreenState extends State<TabletScreen> {
 
   Future<void> _performDeviceLogoutReset() async {
     try {
+      await MobileAuthService.instance.signOut();
       await DeviceConfigService.clearLoginStateOnly();
 
       if (!mounted) return;
@@ -844,7 +847,7 @@ class _TabletScreenState extends State<TabletScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _message = "Logout failed: $e");
+      setState(() => _message = 'Logout failed: $e');
     }
   }
 
@@ -858,7 +861,7 @@ class _TabletScreenState extends State<TabletScreen> {
     return showGeneralDialog<T>(
       context: context,
       barrierDismissible: dismissible,
-      barrierLabel: "dialog",
+      barrierLabel: 'dialog',
       barrierColor: Colors.black.withValues(alpha: 0.65),
       transitionDuration: const Duration(milliseconds: 180),
       pageBuilder: (ctx, a1, a2) {
@@ -1024,7 +1027,7 @@ class _TabletScreenState extends State<TabletScreen> {
     String? inlineError;
 
     await _showAppDialog<void>(
-      title: "Service Settings",
+      title: 'Service Settings',
       width: 640,
       dismissible: true,
       content: StatefulBuilder(
@@ -1059,7 +1062,7 @@ class _TabletScreenState extends State<TabletScreen> {
             setLocal(() {
               busy = true;
               inlineError = null;
-              inlineStatus = "Testing connection…";
+              inlineStatus = 'Testing connection…';
             });
 
             final test = await _testServiceSettings(
@@ -1108,20 +1111,20 @@ class _TabletScreenState extends State<TabletScreen> {
             children: [
               _darkTextField(
                 controller: urlCtrl,
-                label: "Service Base URL",
-                hint: "https://apply.tsg.bz/tsgtcwebserviceotc/tsgtc.asmx",
+                label: 'Service Base URL',
+                hint: 'https://apply.tsg.bz/tsgtcwebserviceotc/tsgtc.asmx',
               ),
               const SizedBox(height: 12),
               _darkTextField(
                 controller: authCtrl,
-                label: "Auth Token",
-                hint: "",
+                label: 'Auth Token',
+                hint: '',
               ),
               const SizedBox(height: 10),
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  "Tip: If punches won’t sync, confirm this URL matches the working kiosk web path.",
+                  'Tip: If punches won’t sync, confirm this URL matches the working kiosk web path.',
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.60),
                     fontWeight: FontWeight.w600,
@@ -1137,25 +1140,25 @@ class _TabletScreenState extends State<TabletScreen> {
                 banner(text: inlineStatus!, isError: false),
               ],
               const SizedBox(height: 18),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                alignment: WrapAlignment.end,
                 children: [
                   _dialogButton(
-                    label: "Logout / Reset",
+                    label: 'Logout / Reset',
                     filled: false,
                     busy: busy,
                     onTap: logoutReset,
                   ),
-                  const SizedBox(width: 10),
                   _dialogButton(
-                    label: "Close",
+                    label: 'Close',
                     filled: false,
                     busy: busy,
                     onTap: () => Navigator.of(ctx).pop(),
                   ),
-                  const SizedBox(width: 10),
                   _dialogButton(
-                    label: "Verify & Save",
+                    label: 'Verify & Save',
                     filled: true,
                     busy: busy,
                     onTap: verifyAndSave,
@@ -1234,7 +1237,7 @@ class _TabletScreenState extends State<TabletScreen> {
   Future<void> _copyTextToClipboard(String label, String text) async {
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
-    setState(() => _message = "$label copied to clipboard.");
+    setState(() => _message = '$label copied to clipboard.');
   }
 
   Future<File> _writeCsvTempFile(String csv) async {
@@ -1256,14 +1259,14 @@ class _TabletScreenState extends State<TabletScreen> {
     );
 
     if (!mounted) return;
-    setState(() => _message = "CSV ready to save/share.");
+    setState(() => _message = 'CSV ready to save/share.');
   }
 
   Future<void> _showCsvPreviewDialog(String csv) async {
     final previewLines = const LineSplitter().convert(csv).take(20).join('\n');
 
     await _showAppDialog<void>(
-      title: "CSV Preview",
+      title: 'CSV Preview',
       width: 980,
       dismissible: true,
       content: Container(
@@ -1292,20 +1295,20 @@ class _TabletScreenState extends State<TabletScreen> {
       ),
       actions: [
         _dialogButton(
-          label: "Close",
+          label: 'Close',
           filled: false,
           onTap: () => Navigator.of(context).pop(),
         ),
         _dialogButton(
-          label: "Copy CSV",
+          label: 'Copy CSV',
           filled: false,
           onTap: () async {
-            await _copyTextToClipboard("CSV", csv);
+            await _copyTextToClipboard('CSV', csv);
             if (mounted) Navigator.of(context).pop();
           },
         ),
         _dialogButton(
-          label: "Download CSV",
+          label: 'Download CSV',
           filled: true,
           onTap: () async {
             Navigator.of(context).pop();
@@ -1342,7 +1345,7 @@ class _TabletScreenState extends State<TabletScreen> {
     }
 
     await _showAppDialog<void>(
-      title: "Punch Log (This Tablet)",
+      title: 'Punch Log (This Tablet)',
       width: 950,
       dismissible: true,
       content: LayoutBuilder(
@@ -1354,26 +1357,25 @@ class _TabletScreenState extends State<TabletScreen> {
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  pill("Pending: $_pendingCount"),
-                  const SizedBox(width: 10),
-                  pill("Showing: ${items.length}"),
-                  const Spacer(),
+                  pill('Pending: $_pendingCount'),
+                  pill('Showing: ${items.length}'),
                   _dialogButton(
-                    label: "Copy CSV",
+                    label: 'Copy CSV',
                     filled: false,
-                    onTap: () => _copyTextToClipboard("CSV", csvText),
+                    onTap: () => _copyTextToClipboard('CSV', csvText),
                   ),
-                  const SizedBox(width: 10),
                   _dialogButton(
-                    label: "Copy JSON",
+                    label: 'Copy JSON',
                     filled: false,
-                    onTap: () => _copyTextToClipboard("JSON", jsonText),
+                    onTap: () => _copyTextToClipboard('JSON', jsonText),
                   ),
-                  const SizedBox(width: 10),
                   _dialogButton(
-                    label: "Export CSV",
+                    label: 'Export CSV',
                     filled: false,
                     onTap: () => _showCsvPreviewDialog(csvText),
                   ),
@@ -1396,7 +1398,7 @@ class _TabletScreenState extends State<TabletScreen> {
                     Expanded(
                       flex: 3,
                       child: Text(
-                        "TIME ▼",
+                        'TIME ▼',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.78),
                           fontWeight: FontWeight.w900,
@@ -1408,7 +1410,7 @@ class _TabletScreenState extends State<TabletScreen> {
                     Expanded(
                       flex: 4,
                       child: Text(
-                        "EMP (NAME / ID)",
+                        'EMP (NAME / ID)',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.78),
                           fontWeight: FontWeight.w900,
@@ -1420,7 +1422,7 @@ class _TabletScreenState extends State<TabletScreen> {
                     Expanded(
                       flex: 2,
                       child: Text(
-                        "STATUS",
+                        'STATUS',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.78),
                           fontWeight: FontWeight.w900,
@@ -1432,7 +1434,7 @@ class _TabletScreenState extends State<TabletScreen> {
                     Expanded(
                       flex: 3,
                       child: Text(
-                        "LAT/LNG ± ACC",
+                        'LAT/LNG ± ACC',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.78),
                           fontWeight: FontWeight.w900,
@@ -1458,7 +1460,7 @@ class _TabletScreenState extends State<TabletScreen> {
                 child: items.isEmpty
                     ? Center(
                   child: Text(
-                    "No punches recorded on this tablet yet.",
+                    'No punches recorded on this tablet yet.',
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.70),
                       fontWeight: FontWeight.w700,
@@ -1476,43 +1478,43 @@ class _TabletScreenState extends State<TabletScreen> {
                       final m = items[i];
 
                       final ts = _formatLogDisplayTimeTwoLine(
-                        (m["timestampUtc"] ?? "").toString(),
+                        (m['timestampUtc'] ?? '').toString(),
                       );
-                      final empId = (m["employeeId"] ?? "").toString();
+                      final empId = (m['employeeId'] ?? '').toString();
                       final empName =
-                      (m["employeeName"] ?? "").toString();
+                      (m['employeeName'] ?? '').toString();
                       final status =
-                      (m["status"] ?? "").toString().toUpperCase();
-                      final lat = (m["latitude"] as num?)?.toDouble();
-                      final lng = (m["longitude"] as num?)?.toDouble();
+                      (m['status'] ?? '').toString().toUpperCase();
+                      final lat = (m['latitude'] as num?)?.toDouble();
+                      final lng = (m['longitude'] as num?)?.toDouble();
                       final accuracy =
-                      (m["accuracyMeters"] as num?)?.toDouble();
+                      (m['accuracyMeters'] as num?)?.toDouble();
                       final source =
-                      (m["locationSource"] ?? "").toString();
+                      (m['locationSource'] ?? '').toString();
 
-                      final statusBg = status == "IN"
+                      final statusBg = status == 'IN'
                           ? Colors.green.withValues(alpha: 0.12)
-                          : status == "OUT"
+                          : status == 'OUT'
                           ? Colors.red.withValues(alpha: 0.12)
                           : Colors.white.withValues(alpha: 0.08);
 
-                      final statusBorder = status == "IN"
+                      final statusBorder = status == 'IN'
                           ? Colors.green.withValues(alpha: 0.35)
-                          : status == "OUT"
+                          : status == 'OUT'
                           ? Colors.red.withValues(alpha: 0.35)
                           : Colors.white.withValues(alpha: 0.14);
 
-                      final statusColor = status == "IN"
+                      final statusColor = status == 'IN'
                           ? Colors.green.withValues(alpha: 0.95)
-                          : status == "OUT"
+                          : status == 'OUT'
                           ? Colors.red.withValues(alpha: 0.95)
                           : Colors.white.withValues(alpha: 0.85);
 
                       final latLngText = (lat == null || lng == null)
-                          ? "(no location)"
+                          ? '(no location)'
                           : accuracy == null
-                          ? "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}${source.isEmpty ? "" : " ($source)"}"
-                          : "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}\n±${accuracy.toStringAsFixed(1)}m${source.isEmpty ? "" : " ($source)"}";
+                          ? '${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}${source.isEmpty ? "" : " ($source)"}'
+                          : '${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}\n±${accuracy.toStringAsFixed(1)}m${source.isEmpty ? "" : " ($source)"}';
 
                       return Container(
                         padding: const EdgeInsets.symmetric(
@@ -1533,7 +1535,7 @@ class _TabletScreenState extends State<TabletScreen> {
                             Expanded(
                               flex: 3,
                               child: Text(
-                                ts.isEmpty ? "(unknown)" : ts,
+                                ts.isEmpty ? '(unknown)' : ts,
                                 style: TextStyle(
                                   color:
                                   Colors.white.withValues(alpha: 0.88),
@@ -1546,7 +1548,7 @@ class _TabletScreenState extends State<TabletScreen> {
                             Expanded(
                               flex: 4,
                               child: Text(
-                                "${empName.isEmpty ? "(unknown)" : empName}\n$empId",
+                                '${empName.isEmpty ? "(unknown)" : empName}\n$empId',
                                 style: TextStyle(
                                   color:
                                   Colors.white.withValues(alpha: 0.88),
@@ -1575,7 +1577,7 @@ class _TabletScreenState extends State<TabletScreen> {
                                     ),
                                   ),
                                   child: Text(
-                                    status.isEmpty ? "?" : status,
+                                    status.isEmpty ? '?' : status,
                                     style: TextStyle(
                                       color: statusColor,
                                       fontWeight: FontWeight.w900,
@@ -1612,7 +1614,7 @@ class _TabletScreenState extends State<TabletScreen> {
       ),
       actions: [
         _dialogButton(
-          label: "Close",
+          label: 'Close',
           filled: true,
           onTap: () => Navigator.of(context).pop(),
         ),
@@ -1628,9 +1630,7 @@ class _TabletScreenState extends State<TabletScreen> {
     final hh = u.hour.toString().padLeft(2, '0');
     final min = u.minute.toString().padLeft(2, '0');
     final ss = u.second.toString().padLeft(2, '0');
-    return '$yyyy-$mm-$dd'
-        'T$hh:$min:$ss'
-        'Z';
+    return '$yyyy-$mm-${dd}T$hh:$min:${ss}Z';
   }
 
   String _normalizeIsoNoMillis(String s) {
@@ -1659,11 +1659,11 @@ class _TabletScreenState extends State<TabletScreen> {
       int h = dt.hour;
       final min = dt.minute.toString().padLeft(2, '0');
       final sec = dt.second.toString().padLeft(2, '0');
-      final ampm = h >= 12 ? "PM" : "AM";
+      final ampm = h >= 12 ? 'PM' : 'AM';
       h = h % 12;
       if (h == 0) h = 12;
 
-      return "$mm/$dd/$yyyy $h:$min:$sec\n$ampm";
+      return '$mm/$dd/$yyyy $h:$min:$sec\n$ampm';
     } catch (_) {
       return t.replaceAll('T', ' ').replaceAll('Z', '');
     }
@@ -1689,7 +1689,7 @@ class _TabletScreenState extends State<TabletScreen> {
           final timeStr = _formatTime(_now);
           final dateStr = _formatDate(_now);
 
-          final actionText = _clockedIn ? "CLOCK OUT" : "CLOCK IN";
+          final actionText = _clockedIn ? 'CLOCK OUT' : 'CLOCK IN';
           final actionColor = _clockedIn ? Colors.red : Colors.green;
 
           final canVerify = _ready && !_verifying && !_punching;
@@ -1711,6 +1711,7 @@ class _TabletScreenState extends State<TabletScreen> {
             ],
           )
               : Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ConstrainedBox(
                 constraints: BoxConstraints(
@@ -1768,7 +1769,7 @@ class _TabletScreenState extends State<TabletScreen> {
                       ),
                       SizedBox(width: s(8)),
                       Text(
-                        "INITIALIZING…",
+                        'INITIALIZING…',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.80),
                           fontSize: s(12),
@@ -1784,8 +1785,8 @@ class _TabletScreenState extends State<TabletScreen> {
                       final dotColor =
                       online ? Colors.green : Colors.red;
                       final text = _lastSyncAttemptLocal == null
-                          ? "Pending offline punches: $_pendingCount"
-                          : "Last Sync Attempt: ${_formatSyncStamp(_lastSyncAttemptLocal!)}   |   Pending: $_pendingCount";
+                          ? 'Pending offline punches: $_pendingCount'
+                          : 'Last Sync Attempt: ${_formatSyncStamp(_lastSyncAttemptLocal!)}   |   Pending: $_pendingCount';
 
                       return Row(
                         children: [
@@ -1799,7 +1800,7 @@ class _TabletScreenState extends State<TabletScreen> {
                           ),
                           SizedBox(width: s(8)),
                           Text(
-                            online ? "ONLINE" : "OFFLINE",
+                            online ? 'ONLINE' : 'OFFLINE',
                             style: TextStyle(
                               color: Colors.white.withValues(alpha: 0.80),
                               fontSize: s(12),
@@ -1831,7 +1832,7 @@ class _TabletScreenState extends State<TabletScreen> {
                     onPressed:
                     !_ready ? null : () => _trySync(forceOnline: true),
                     child: Text(
-                      "Sync Now",
+                      'Sync Now',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.75),
                         fontSize: s(12),
@@ -1844,7 +1845,7 @@ class _TabletScreenState extends State<TabletScreen> {
                   right: s(24),
                   bottom: s(8),
                   child: Text(
-                    "ver 5.0.0",
+                    'ver 5.0.0',
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.55),
                       fontSize: s(12),
@@ -1917,7 +1918,7 @@ class _TabletScreenState extends State<TabletScreen> {
             ),
           ),
           SizedBox(height: s(14)),
-          _buildKeypad(s),
+          _buildKeypad(s, canVerify),
         ],
       ),
     );
@@ -1952,9 +1953,10 @@ class _TabletScreenState extends State<TabletScreen> {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            "HAVE YOU REMOVED YOUR LOCK\nTODAY?",
+            'HAVE YOU REMOVED YOUR LOCK\nTODAY?',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.red.withValues(alpha: 0.9),
@@ -1990,8 +1992,9 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
             ),
           ),
-          SizedBox(height: s(18)),
-          Expanded(
+          SizedBox(height: s(22)),
+          SizedBox(
+            height: s(180),
             child: Center(
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: s(24)),
@@ -2030,8 +2033,8 @@ class _TabletScreenState extends State<TabletScreen> {
                   SizedBox(height: s(6)),
                   Text(
                     _clockedIn
-                        ? "You are currently IN"
-                        : "You are currently OUT",
+                        ? 'You are currently IN'
+                        : 'You are currently OUT',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.85),
@@ -2105,17 +2108,17 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
-  Widget _buildKeypad(double Function(double) s) {
+  Widget _buildKeypad(double Function(double) s, bool canVerify) {
     return Column(
       children: [
-        _keypadRow(["1", "2", "3"], s),
-        _keypadRow(["4", "5", "6"], s),
-        _keypadRow(["7", "8", "9"], s),
+        _keypadRow(['1', '2', '3'], s),
+        _keypadRow(['4', '5', '6'], s),
+        _keypadRow(['7', '8', '9'], s),
         Row(
           children: [
             Expanded(
               child: _keyButton(
-                label: "CLEAR",
+                label: 'CLEAR',
                 onTap: _handleClearPressed,
                 filled: true,
                 fontSize: s(18),
@@ -2124,15 +2127,15 @@ class _TabletScreenState extends State<TabletScreen> {
             ),
             Expanded(
               child: _keyButton(
-                label: "0",
-                onTap: () => _appendDigit("0"),
+                label: '0',
+                onTap: () => _appendDigit('0'),
                 s: s,
               ),
             ),
             Expanded(
               child: _keyButton(
-                label: "VERIFY",
-                onTap: _verifyEmployee,
+                label: 'VERIFY',
+                onTap: canVerify ? _verifyEmployee : () {},
                 filled: true,
                 fontSize: s(18),
                 s: s,
@@ -2200,54 +2203,56 @@ class _TabletScreenState extends State<TabletScreen> {
 
   String _formatTime(DateTime dt) {
     int h = dt.hour;
-    final m = dt.minute.toString().padLeft(2, "0");
-    final ampm = h >= 12 ? "PM" : "AM";
+    final m = dt.minute.toString().padLeft(2, '0');
+    final ampm = h >= 12 ? 'PM' : 'AM';
     h = h % 12;
     if (h == 0) h = 12;
-    return "$h:$m $ampm";
+    return '$h:$m $ampm';
   }
 
   String _formatDate(DateTime dt) {
     const months = [
-      "January",
-      "February",
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December"
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December'
     ];
+
     const days = [
-      "Monday",
-      "Tuesday",
-      "Wednesday",
-      "Thursday",
-      "Friday",
-      "Saturday",
-      "Sunday"
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday'
     ];
+
     final dayName = days[dt.weekday - 1];
     final monthName = months[dt.month - 1];
-    return "$dayName, $monthName ${dt.day}, ${dt.year}";
+    return '$dayName, $monthName ${dt.day}, ${dt.year}';
   }
 
   String _formatSyncStamp(DateTime dt) {
-    final mm = dt.month.toString().padLeft(2, "0");
-    final dd = dt.day.toString().padLeft(2, "0");
+    final mm = dt.month.toString().padLeft(2, '0');
+    final dd = dt.day.toString().padLeft(2, '0');
     final yyyy = dt.year.toString();
 
     int h = dt.hour;
-    final m = dt.minute.toString().padLeft(2, "0");
-    final s = dt.second.toString().padLeft(2, "0");
-    final ampm = h >= 12 ? "PM" : "AM";
+    final m = dt.minute.toString().padLeft(2, '0');
+    final s = dt.second.toString().padLeft(2, '0');
+    final ampm = h >= 12 ? 'PM' : 'AM';
     h = h % 12;
     if (h == 0) h = 12;
 
-    return "$mm/$dd/$yyyy $h:$m:$s $ampm";
+    return '$mm/$dd/$yyyy $h:$m:$s $ampm';
   }
 }
