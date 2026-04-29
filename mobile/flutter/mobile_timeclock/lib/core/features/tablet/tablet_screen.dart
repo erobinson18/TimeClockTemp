@@ -1330,8 +1330,10 @@ class _TabletScreenState extends State<TabletScreen> {
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(999),
-          border:
-          Border.all(color: Colors.white.withValues(alpha: 0.14), width: 1.6),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.14),
+            width: 1.6,
+          ),
         ),
         child: Text(
           text,
@@ -1669,21 +1671,48 @@ class _TabletScreenState extends State<TabletScreen> {
     }
   }
 
+  double _layoutScale(BoxConstraints constraints) {
+    final w = constraints.maxWidth;
+    final h = constraints.maxHeight;
+
+    if (w < 700) return 0.72;
+    if (w < 950) return 0.82;
+    if (w > 1500 && h > 850) return 1.05;
+
+    return 0.92;
+  }
+
+  double _maxContentWidth(BoxConstraints constraints) {
+    if (constraints.maxWidth > 1600) return 1500;
+    return constraints.maxWidth;
+  }
+
+  BoxDecoration _panelDecoration(double Function(double) s) {
+    return BoxDecoration(
+      color: Colors.black.withValues(alpha: 0.58),
+      borderRadius: BorderRadius.circular(s(28)),
+      border: Border.all(
+        color: Colors.white.withValues(alpha: 0.16),
+        width: s(1.8),
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.50),
+          blurRadius: s(26),
+          spreadRadius: s(2),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final isPhone = constraints.maxWidth < 900;
-          final isDesktop = constraints.maxWidth > 1500;
-
-          final scale = isPhone
-              ? (constraints.maxWidth / 780.0).clamp(0.70, 0.86).toDouble()
-              : isDesktop
-              ? (constraints.maxWidth / 1700.0).clamp(0.95, 1.08).toDouble()
-              : (constraints.maxWidth / 1600.0).clamp(0.78, 1.0).toDouble();
-
+          final isPhone = constraints.maxWidth < 850;
+          final scale = _layoutScale(constraints);
           double s(double v) => v * scale;
 
           final timeStr = _formatTime(_now);
@@ -1695,9 +1724,12 @@ class _TabletScreenState extends State<TabletScreen> {
           final canVerify = _ready && !_verifying && !_punching;
           final canPunch = _ready && _verified && !_verifying && !_punching;
 
-          final mainContent = isPhone
+          final content = isPhone
               ? Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              _buildTopStatusBar(s, compact: true),
+              SizedBox(height: s(16)),
               _buildLeftPanel(canVerify, s),
               SizedBox(height: s(18)),
               _buildRightPanel(
@@ -1710,25 +1742,34 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
             ],
           )
-              : Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+              : Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  minWidth: s(320),
-                  maxWidth: s(400),
-                ),
-                child: _buildLeftPanel(canVerify, s),
-              ),
-              SizedBox(width: s(24)),
-              Expanded(
-                child: _buildRightPanel(
-                  s: s,
-                  timeStr: timeStr,
-                  dateStr: dateStr,
-                  actionText: actionText,
-                  actionColor: actionColor,
-                  canPunch: canPunch,
+              _buildTopStatusBar(s, compact: false),
+              SizedBox(height: s(14)),
+              SizedBox(
+                height: (constraints.maxHeight * 0.78)
+                    .clamp(s(540), s(720))
+                    .toDouble(),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      width: s(365),
+                      child: _buildLeftPanel(canVerify, s),
+                    ),
+                    SizedBox(width: s(26)),
+                    Expanded(
+                      child: _buildRightPanel(
+                        s: s,
+                        timeStr: timeStr,
+                        dateStr: dateStr,
+                        actionText: actionText,
+                        actionColor: actionColor,
+                        canPunch: canPunch,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1739,117 +1780,37 @@ class _TabletScreenState extends State<TabletScreen> {
             resizeToAvoidBottomInset: true,
             body: Stack(
               children: [
-                const AppBackground(overlayOpacity: 0.68),
+                const AppBackground(overlayOpacity: 0.4),
                 SafeArea(
-                  child: SingleChildScrollView(
-                    keyboardDismissBehavior:
-                    ScrollViewKeyboardDismissBehavior.onDrag,
-                    padding: EdgeInsets.all(s(24)),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minHeight: constraints.maxHeight - s(48),
+                  child: Center(
+                    child: SingleChildScrollView(
+                      keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                      padding: EdgeInsets.symmetric(
+                        horizontal: s(24),
+                        vertical: s(22),
                       ),
-                      child: mainContent,
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: s(24),
-                  top: s(10),
-                  child: !_ready || _heartbeat == null
-                      ? Row(
-                    children: [
-                      Container(
-                        width: s(10),
-                        height: s(10),
-                        decoration: const BoxDecoration(
-                          color: Colors.orange,
-                          shape: BoxShape.circle,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: _maxContentWidth(constraints),
+                          minHeight: isPhone
+                              ? constraints.maxHeight - s(44)
+                              : constraints.maxHeight - s(60),
                         ),
-                      ),
-                      SizedBox(width: s(8)),
-                      Text(
-                        'INITIALIZING…',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.80),
-                          fontSize: s(12),
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: s(1),
-                        ),
-                      ),
-                    ],
-                  )
-                      : ValueListenableBuilder<bool>(
-                    valueListenable: _heartbeat!.online,
-                    builder: (context, online, _) {
-                      final dotColor =
-                      online ? Colors.green : Colors.red;
-                      final text = _lastSyncAttemptLocal == null
-                          ? 'Pending offline punches: $_pendingCount'
-                          : 'Last Sync Attempt: ${_formatSyncStamp(_lastSyncAttemptLocal!)}   |   Pending: $_pendingCount';
-
-                      return Row(
-                        children: [
-                          Container(
-                            width: s(10),
-                            height: s(10),
-                            decoration: BoxDecoration(
-                              color: dotColor,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          SizedBox(width: s(8)),
-                          Text(
-                            online ? 'ONLINE' : 'OFFLINE',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.80),
-                              fontSize: s(12),
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: s(1),
-                            ),
-                          ),
-                          if (!isPhone) ...[
-                            SizedBox(width: s(18)),
-                            Text(
-                              text,
-                              style: TextStyle(
-                                color:
-                                Colors.white.withValues(alpha: 0.75),
-                                fontSize: s(12),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ],
-                      );
-                    },
-                  ),
-                ),
-                Positioned(
-                  right: s(24),
-                  top: s(10),
-                  child: TextButton(
-                    onPressed:
-                    !_ready ? null : () => _trySync(forceOnline: true),
-                    child: Text(
-                      'Sync Now',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.75),
-                        fontSize: s(12),
-                        fontWeight: FontWeight.w700,
+                        child: content,
                       ),
                     ),
                   ),
                 ),
                 Positioned(
                   right: s(24),
-                  bottom: s(8),
+                  bottom: s(10),
                   child: Text(
                     'ver 5.0.0',
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.55),
+                      color: Colors.white.withValues(alpha: 0.58),
                       fontSize: s(12),
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -1861,32 +1822,145 @@ class _TabletScreenState extends State<TabletScreen> {
     );
   }
 
-  Widget _buildLeftPanel(bool canVerify, double Function(double) s) {
-    return Container(
-      padding: EdgeInsets.all(s(18)),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.46),
-        borderRadius: BorderRadius.circular(s(22)),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.15),
-          width: s(2),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
-            blurRadius: s(18),
-            spreadRadius: s(1),
+  Widget _buildTopStatusBar(
+      double Function(double) s, {
+        required bool compact,
+      }) {
+    if (!_ready || _heartbeat == null) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: s(10),
+                height: s(10),
+                decoration: const BoxDecoration(
+                  color: Colors.orange,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              SizedBox(width: s(8)),
+              Text(
+                'INITIALIZING…',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.82),
+                  fontSize: s(12),
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: s(1),
+                ),
+              ),
+            ],
           ),
         ],
-      ),
+      );
+    }
+
+    return ValueListenableBuilder<bool>(
+      valueListenable: _heartbeat!.online,
+      builder: (context, online, _) {
+        final dotColor = online ? Colors.green : Colors.red;
+        final syncText = _lastSyncAttemptLocal == null
+            ? 'Pending: $_pendingCount'
+            : 'Last Sync: ${_formatSyncStamp(_lastSyncAttemptLocal!)}   |   Pending: $_pendingCount';
+
+        return Container(
+          width: double.infinity,
+          padding: EdgeInsets.symmetric(
+            horizontal: s(14),
+            vertical: s(8),
+          ),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.42),
+            borderRadius: BorderRadius.circular(s(999)),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.12),
+              width: s(1.4),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: s(10),
+                height: s(10),
+                decoration: BoxDecoration(
+                  color: dotColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              SizedBox(width: s(8)),
+              Text(
+                online ? 'ONLINE' : 'OFFLINE',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.84),
+                  fontSize: s(12),
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: s(1),
+                ),
+              ),
+              if (!compact) ...[
+                SizedBox(width: s(18)),
+                Expanded(
+                  child: Text(
+                    syncText,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.74),
+                      fontSize: s(12),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ] else ...[
+                const Spacer(),
+                Text(
+                  'Pending: $_pendingCount',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.74),
+                    fontSize: s(12),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+              SizedBox(width: s(12)),
+              TextButton(
+                onPressed: !_ready ? null : () => _trySync(forceOnline: true),
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: s(10),
+                    vertical: s(4),
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  'Sync Now',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.82),
+                    fontSize: s(12),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildLeftPanel(bool canVerify, double Function(double) s) {
+    return Container(
+      padding: EdgeInsets.all(s(22)),
+      decoration: _panelDecoration(s),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
             height: s(64),
             padding: EdgeInsets.symmetric(horizontal: s(16)),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.12),
+              color: Colors.white.withValues(alpha: 0.11),
               borderRadius: BorderRadius.circular(s(16)),
               border: Border.all(
                 color: Colors.white.withValues(alpha: 0.18),
@@ -1900,8 +1974,8 @@ class _TabletScreenState extends State<TabletScreen> {
                     _employeeNumber,
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: s(32),
-                      fontWeight: FontWeight.w800,
+                      fontSize: s(31),
+                      fontWeight: FontWeight.w900,
                       letterSpacing: s(2),
                     ),
                   ),
@@ -1917,7 +1991,7 @@ class _TabletScreenState extends State<TabletScreen> {
               ],
             ),
           ),
-          SizedBox(height: s(14)),
+          SizedBox(height: s(22)),
           _buildKeypad(s, canVerify),
         ],
       ),
@@ -1932,177 +2006,162 @@ class _TabletScreenState extends State<TabletScreen> {
     required Color actionColor,
     required bool canPunch,
   }) {
-    final clockBtnSize = s(160);
+    final clockBtnSize = s(150);
 
     return Container(
-      padding: EdgeInsets.all(s(22)),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.46),
-        borderRadius: BorderRadius.circular(s(22)),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.15),
-          width: s(2),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
-            blurRadius: s(18),
-            spreadRadius: s(1),
-          ),
-        ],
-      ),
+      padding: EdgeInsets.all(s(30)),
+      decoration: _panelDecoration(s),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            'HAVE YOU REMOVED YOUR LOCK\nTODAY?',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.red.withValues(alpha: 0.9),
-              fontSize: s(18),
-              fontWeight: FontWeight.w900,
-              letterSpacing: s(1),
-            ),
-          ),
-          SizedBox(height: s(10)),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              timeStr,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: s(92),
-                fontWeight: FontWeight.w900,
-                height: 1.0,
-              ),
-            ),
-          ),
-          SizedBox(height: s(6)),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              dateStr,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.85),
-                fontSize: s(20),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          SizedBox(height: s(22)),
-          SizedBox(
-            height: s(180),
-            child: Center(
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: s(24)),
-                child: LogoHeader(
-                  heightFactor: 0.22,
-                  padding: EdgeInsets.zero,
-                  maxHeight: s(220),
-                  minHeight: s(90),
+          Column(
+            children: [
+              Text(
+                'HAVE YOU REMOVED YOUR LOCK\nTODAY?',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.red.withValues(alpha: 0.95),
+                  fontSize: s(17),
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: s(1.1),
+                  height: 1.15,
                 ),
               ),
-            ),
-          ),
-          if (_verified && _fullName != null) ...[
-            SizedBox(height: s(10)),
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: s(16), vertical: s(10)),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(s(16)),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.14),
-                  width: s(2),
+              SizedBox(height: s(14)),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  timeStr,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: s(84),
+                    fontWeight: FontWeight.w900,
+                    height: 1.0,
+                    letterSpacing: s(1),
+                  ),
                 ),
               ),
-              child: Column(
-                children: [
-                  Text(
-                    _fullName!.toUpperCase(),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: s(22),
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  SizedBox(height: s(6)),
-                  Text(
-                    _clockedIn
-                        ? 'You are currently IN'
-                        : 'You are currently OUT',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.85),
-                      fontSize: s(14),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
+              SizedBox(height: s(8)),
+              Text(
+                dateStr,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.86),
+                  fontSize: s(17),
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ),
-          ] else ...[
-            SizedBox(height: s(8)),
-          ],
-          SizedBox(height: s(12)),
-          Center(
-            child: GestureDetector(
-              onTap: canPunch ? _doPunch : null,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 150),
-                opacity: canPunch ? 1.0 : 0.35,
-                child: Container(
-                  width: clockBtnSize,
-                  height: clockBtnSize,
+            ],
+          ),
+          Column(
+            children: [
+              LogoHeader(
+                heightFactor: 0.30,
+                padding: EdgeInsets.zero,
+                maxHeight: s(240),
+                minHeight: s(130),
+              ),
+              if (_verified && _fullName != null) ...[
+                SizedBox(height: s(18)),
+                Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: s(18),
+                    vertical: s(12),
+                  ),
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: actionColor,
-                    boxShadow: [
-                      BoxShadow(
-                        color: actionColor.withValues(alpha: 0.30),
-                        blurRadius: s(18),
-                        spreadRadius: s(3),
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(s(16)),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.14),
+                      width: s(2),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        _fullName!.toUpperCase(),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: s(21),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      SizedBox(height: s(6)),
+                      Text(
+                        _clockedIn
+                            ? 'You are currently IN'
+                            : 'You are currently OUT',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.85),
+                          fontSize: s(14),
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ],
                   ),
-                  alignment: Alignment.center,
-                  child: _punching
-                      ? SizedBox(
-                    width: s(28),
-                    height: s(28),
-                    child:
-                    const CircularProgressIndicator(strokeWidth: 3),
-                  )
-                      : Text(
-                    actionText,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.black,
-                      fontSize: s(22),
-                      fontWeight: FontWeight.w900,
-                      height: 1.0,
+                ),
+              ],
+            ],
+          ),
+          Column(
+            children: [
+              GestureDetector(
+                onTap: canPunch ? _doPunch : null,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 150),
+                  opacity: canPunch ? 1.0 : 0.45,
+                  child: Container(
+                    width: clockBtnSize,
+                    height: clockBtnSize,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: actionColor,
+                      boxShadow: [
+                        BoxShadow(
+                          color: actionColor.withValues(alpha: 0.32),
+                          blurRadius: s(20),
+                          spreadRadius: s(4),
+                        ),
+                      ],
+                    ),
+                    alignment: Alignment.center,
+                    child: _punching
+                        ? SizedBox(
+                      width: s(28),
+                      height: s(28),
+                      child:
+                      const CircularProgressIndicator(strokeWidth: 3),
+                    )
+                        : Text(
+                      actionText,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontSize: s(20),
+                        fontWeight: FontWeight.w900,
+                        height: 1.0,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
+              if (_message != null) ...[
+                SizedBox(height: s(16)),
+                Text(
+                  _message!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontSize: s(14),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
           ),
-          SizedBox(height: s(12)),
-          if (_message != null)
-            Text(
-              _message!,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.9),
-                fontSize: s(14),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          SizedBox(height: s(6)),
         ],
       ),
     );
@@ -2121,7 +2180,7 @@ class _TabletScreenState extends State<TabletScreen> {
                 label: 'CLEAR',
                 onTap: _handleClearPressed,
                 filled: true,
-                fontSize: s(18),
+                fontSize: s(16),
                 s: s,
               ),
             ),
@@ -2137,7 +2196,7 @@ class _TabletScreenState extends State<TabletScreen> {
                 label: 'VERIFY',
                 onTap: canVerify ? _verifyEmployee : () {},
                 filled: true,
-                fontSize: s(18),
+                fontSize: s(16),
                 s: s,
               ),
             ),
@@ -2171,28 +2230,28 @@ class _TabletScreenState extends State<TabletScreen> {
     double? fontSize,
   }) {
     return Padding(
-      padding: EdgeInsets.all(s(10)),
+      padding: EdgeInsets.all(s(8)),
       child: InkWell(
-        borderRadius: BorderRadius.circular(s(18)),
+        borderRadius: BorderRadius.circular(s(16)),
         onTap: onTap,
         child: Container(
-          height: s(78),
+          height: s(72),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(s(18)),
+            borderRadius: BorderRadius.circular(s(16)),
             border: Border.all(
-              color: Colors.white.withValues(alpha: 0.20),
+              color: Colors.white.withValues(alpha: 0.22),
               width: s(2),
             ),
             color:
-            filled ? Colors.white.withValues(alpha: 0.12) : Colors.transparent,
+            filled ? Colors.white.withValues(alpha: 0.13) : Colors.black.withValues(alpha: 0.12),
           ),
           alignment: Alignment.center,
           child: Text(
             label,
             style: TextStyle(
               color: Colors.white,
-              fontSize: fontSize ?? s(26),
-              fontWeight: FontWeight.w800,
+              fontSize: fontSize ?? s(25),
+              fontWeight: FontWeight.w900,
               letterSpacing: s(1),
             ),
           ),
