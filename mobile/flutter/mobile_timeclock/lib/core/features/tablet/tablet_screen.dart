@@ -1,18 +1,19 @@
 // lib/core/features/tablet/tablet_screen.dart
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+// import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
+//import 'package:path_provider/path_provider.dart';
+//import 'package:share_plus/share_plus.dart';
 
 import '../../api_client.dart';
 import '../../Services/device_config_service.dart';
 import '../../services/heartbeat_service.dart';
+import '../../services/punch_log_exporter.dart';
 
 import '../../../data/local/local_seq_store.dart';
 import '../../../data/local/punch_log_store.dart';
@@ -29,7 +30,7 @@ import '../../../data/remote/timeclock_api.dart';
 import '../../../widgets/app_background.dart';
 import '../../../widgets/logo_header.dart';
 
-import '../mobile/mobile_auth_service.dart';
+import '../mobile/mobile_auth_service_io.dart';
 import '../startup/device_admin_menu_screen.dart';
 
 import '../../../main.dart';
@@ -1240,7 +1241,14 @@ class _TabletScreenState extends State<TabletScreen> {
     setState(() => _message = '$label copied to clipboard.');
   }
 
-  Future<File> _writeCsvTempFile(String csv) async {
+  Future<void> _exportCsvToDevice(String csv) async {
+  await PunchLogExporter.exportCsv(csv);
+
+  if (!mounted) return;
+  setState(() => _message = 'CSV ready to save/share.');
+}
+
+ /* Future<File> _writeCsvTempFile(String csv) async {
     final dir = await getTemporaryDirectory();
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final path = '${dir.path}/punch_log_$stamp.csv';
@@ -1260,7 +1268,7 @@ class _TabletScreenState extends State<TabletScreen> {
 
     if (!mounted) return;
     setState(() => _message = 'CSV ready to save/share.');
-  }
+  }*/
 
   Future<void> _showCsvPreviewDialog(String csv) async {
     final previewLines = const LineSplitter().convert(csv).take(20).join('\n');

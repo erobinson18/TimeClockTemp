@@ -4,7 +4,7 @@ import '../../Services/device_config_service.dart';
 import '../../../main.dart';
 import '../../../widgets/app_background.dart';
 import '../../../widgets/logo_header.dart';
-import '../mobile/mobile_auth_service.dart';
+import '../mobile/mobile_auth_service_io.dart';
 
 class DeviceAdminResetScreen extends StatefulWidget {
   const DeviceAdminResetScreen({super.key});

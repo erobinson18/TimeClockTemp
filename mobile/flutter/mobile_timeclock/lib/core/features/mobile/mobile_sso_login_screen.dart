@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../main.dart';
 import '../../../widgets/app_background.dart';
 import '../../../widgets/logo_header.dart';
-import 'mobile_auth_service.dart';
+import 'mobile_auth_service_io.dart';
 
 class MobileSsoLoginScreen extends StatefulWidget {
   const MobileSsoLoginScreen({super.key});
