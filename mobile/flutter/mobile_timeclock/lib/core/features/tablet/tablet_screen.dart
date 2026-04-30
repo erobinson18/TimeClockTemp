@@ -1,14 +1,11 @@
 // lib/core/features/tablet/tablet_screen.dart
 import 'dart:async';
 import 'dart:convert';
-// import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-//import 'package:path_provider/path_provider.dart';
-//import 'package:share_plus/share_plus.dart';
 
 import '../../api_client.dart';
 import '../../Services/device_config_service.dart';
@@ -30,7 +27,7 @@ import '../../../data/remote/timeclock_api.dart';
 import '../../../widgets/app_background.dart';
 import '../../../widgets/logo_header.dart';
 
-import '../mobile/mobile_auth_service_io.dart';
+import '../mobile/mobile_auth_service.dart';
 import '../startup/device_admin_menu_screen.dart';
 
 import '../../../main.dart';
@@ -1232,7 +1229,7 @@ class _TabletScreenState extends State<TabletScreen> {
       return copy;
     }).toList();
 
-    return const JsonEncoder.withIndent('  ').convert(cleaned);
+    return const JsonEncoder.withIndent(' ').convert(cleaned);
   }
 
   Future<void> _copyTextToClipboard(String label, String text) async {
@@ -1242,33 +1239,11 @@ class _TabletScreenState extends State<TabletScreen> {
   }
 
   Future<void> _exportCsvToDevice(String csv) async {
-  await PunchLogExporter.exportCsv(csv);
-
-  if (!mounted) return;
-  setState(() => _message = 'CSV ready to save/share.');
-}
-
- /* Future<File> _writeCsvTempFile(String csv) async {
-    final dir = await getTemporaryDirectory();
-    final stamp = DateTime.now().millisecondsSinceEpoch;
-    final path = '${dir.path}/punch_log_$stamp.csv';
-    final file = File(path);
-    await file.writeAsString(csv, flush: true);
-    return file;
-  }
-
-  Future<void> _exportCsvToDevice(String csv) async {
-    final file = await _writeCsvTempFile(csv);
-
-    await Share.shareXFiles(
-      [XFile(file.path, mimeType: 'text/csv')],
-      text: 'Punch Log CSV',
-      subject: 'Punch Log CSV',
-    );
+    await PunchLogExporter.exportCsv(csv);
 
     if (!mounted) return;
     setState(() => _message = 'CSV ready to save/share.');
-  }*/
+  }
 
   Future<void> _showCsvPreviewDialog(String csv) async {
     final previewLines = const LineSplitter().convert(csv).take(20).join('\n');
@@ -1695,6 +1670,26 @@ class _TabletScreenState extends State<TabletScreen> {
     return constraints.maxWidth;
   }
 
+  double _statusCardMaxWidth(double Function(double) s) {
+    final name = (_fullName ?? '').trim();
+
+    if (name.length <= 18) return s(280);
+    if (name.length <= 26) return s(340);
+    if (name.length <= 34) return s(405);
+
+    return s(470);
+  }
+
+  double _statusNameFontSize(double Function(double) s) {
+    final name = (_fullName ?? '').trim();
+
+    if (name.length <= 20) return s(21);
+    if (name.length <= 28) return s(19);
+    if (name.length <= 36) return s(17);
+
+    return s(15);
+  }
+
   BoxDecoration _panelDecoration(double Function(double) s) {
     return BoxDecoration(
       color: Colors.black.withValues(alpha: 0.58),
@@ -1788,7 +1783,7 @@ class _TabletScreenState extends State<TabletScreen> {
             resizeToAvoidBottomInset: true,
             body: Stack(
               children: [
-                const AppBackground(overlayOpacity: 0.4),
+                const AppBackground(overlayOpacity: 0.72),
                 SafeArea(
                   child: Center(
                     child: SingleChildScrollView(
@@ -1870,7 +1865,7 @@ class _TabletScreenState extends State<TabletScreen> {
         final dotColor = online ? Colors.green : Colors.red;
         final syncText = _lastSyncAttemptLocal == null
             ? 'Pending: $_pendingCount'
-            : 'Last Sync: ${_formatSyncStamp(_lastSyncAttemptLocal!)}   |   Pending: $_pendingCount';
+            : 'Last Sync: ${_formatSyncStamp(_lastSyncAttemptLocal!)} | Pending: $_pendingCount';
 
         return Container(
           width: double.infinity,
@@ -2072,43 +2067,54 @@ class _TabletScreenState extends State<TabletScreen> {
               ),
               if (_verified && _fullName != null) ...[
                 SizedBox(height: s(18)),
-                Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: s(18),
-                    vertical: s(12),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minWidth: s(240),
+                    maxWidth: _statusCardMaxWidth(s),
                   ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(s(16)),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.14),
-                      width: s(2),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: s(18),
+                      vertical: s(12),
                     ),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        _fullName!.toUpperCase(),
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: s(21),
-                          fontWeight: FontWeight.w900,
-                        ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(s(16)),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.14),
+                        width: s(2),
                       ),
-                      SizedBox(height: s(6)),
-                      Text(
-                        _clockedIn
-                            ? 'You are currently IN'
-                            : 'You are currently OUT',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.85),
-                          fontSize: s(14),
-                          fontWeight: FontWeight.w700,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _fullName!.toUpperCase(),
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: _statusNameFontSize(s),
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
-                      ),
-                    ],
+                        SizedBox(height: s(6)),
+                        Text(
+                          _clockedIn
+                              ? 'You are currently IN'
+                              : 'You are currently OUT',
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.85),
+                            fontSize: s(14),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -2250,8 +2256,9 @@ class _TabletScreenState extends State<TabletScreen> {
               color: Colors.white.withValues(alpha: 0.22),
               width: s(2),
             ),
-            color:
-            filled ? Colors.white.withValues(alpha: 0.13) : Colors.black.withValues(alpha: 0.12),
+            color: filled
+                ? Colors.white.withValues(alpha: 0.13)
+                : Colors.black.withValues(alpha: 0.12),
           ),
           alignment: Alignment.center,
           child: Text(
