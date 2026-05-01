@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -29,9 +30,7 @@ Future<void> main() async {
   await Hive.openBox('status_cache', encryptionCipher: SecureHive.cipher);
   await Hive.openBox('punch_log', encryptionCipher: SecureHive.cipher);
 
-  // Allow the UI to adapt for phones, tablets, laptops, and web.
   await SystemChrome.setPreferredOrientations(const []);
-
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
   runApp(const TimeClockApp());
@@ -51,7 +50,11 @@ class TimeClockApp extends StatelessWidget {
         useMaterial3: true,
         fontFamily: 'Roboto',
       ),
-      initialRoute: Routes.startup,
+
+      // Web is protected by TSG VPN/network access, so it opens directly.
+      // Android/iOS still use startup routing for wall tablet/mobile setup.
+      initialRoute: kIsWeb ? Routes.tablet : Routes.startup,
+
       onGenerateRoute: (settings) {
         switch (settings.name) {
           case Routes.startup:

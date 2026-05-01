@@ -1,10 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../Services/device_config_service.dart';
 import '../../../main.dart';
 import '../../../widgets/app_background.dart';
 import '../../../widgets/logo_header.dart';
-import '../mobile/mobile_auth_service_io.dart';
+import '../mobile/mobile_auth_service.dart';
 import 'device_type_screen.dart';
 
 class StartupGateScreen extends StatefulWidget {
@@ -57,6 +58,18 @@ class _StartupGateScreenState extends State<StartupGateScreen>
     await Future.delayed(const Duration(milliseconds: 550));
     if (!mounted) return;
 
+    if (kIsWeb) {
+      setState(() {
+        _status = 'Opening web time clock...';
+      });
+
+      await Future.delayed(const Duration(milliseconds: 250));
+      if (!mounted) return;
+
+      Navigator.of(context).pushReplacementNamed(Routes.tablet);
+      return;
+    }
+
     if (DeviceConfigService.isWallTabletConfigured) {
       setState(() {
         _status = 'Wall tablet configured. Opening time clock...';
@@ -75,7 +88,7 @@ class _StartupGateScreenState extends State<StartupGateScreen>
       });
 
       final hasSession =
-      await MobileAuthService.instance.hasStoredMobileSession();
+          await MobileAuthService.instance.hasStoredMobileSession();
 
       if (!mounted) return;
 
