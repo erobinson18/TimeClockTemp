@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -11,16 +12,16 @@ import 'core/features/verify/verify_screen.dart';
 import 'core/features/status/status_screen.dart';
 
 class Routes {
-  static const String startup = '/';
-  static const String tablet = '/tablet';
+  static const String startup = '/startup';
+  static const String tablet = '/';
   static const String verify = '/verify';
   static const String status = '/status';
 }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Hive.initFlutter();
 
+  await Hive.initFlutter();
   await SecureHive.init();
 
   await Hive.openBox('device', encryptionCipher: SecureHive.cipher);
@@ -29,11 +30,7 @@ Future<void> main() async {
   await Hive.openBox('status_cache', encryptionCipher: SecureHive.cipher);
   await Hive.openBox('punch_log', encryptionCipher: SecureHive.cipher);
 
-  await SystemChrome.setPreferredOrientations(const [
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
-
+  await SystemChrome.setPreferredOrientations(const []);
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
   runApp(const TimeClockApp());
@@ -45,8 +42,19 @@ class TimeClockApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      title: 'TSG Time Clock',
       debugShowCheckedModeBanner: false,
-      initialRoute: Routes.startup,
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: Colors.black,
+        useMaterial3: true,
+        fontFamily: 'Roboto',
+      ),
+
+      // Web is protected by TSG VPN/network access, so it opens directly.
+      // Android/iOS still use startup routing for wall tablet/mobile setup.
+      initialRoute: kIsWeb ? Routes.tablet : Routes.startup,
+
       onGenerateRoute: (settings) {
         switch (settings.name) {
           case Routes.startup:
@@ -69,10 +77,13 @@ class TimeClockApp extends StatelessWidget {
             if (guid == null || guid.trim().isEmpty) {
               return MaterialPageRoute(
                 builder: (_) => const Scaffold(
-                  body: Center(child: Text("Missing employee GUID")),
+                  body: Center(
+                    child: Text('Missing employee GUID'),
+                  ),
                 ),
               );
             }
+
             return MaterialPageRoute(
               builder: (_) => StatusScreen(employeeGuid: guid),
             );
@@ -80,7 +91,9 @@ class TimeClockApp extends StatelessWidget {
           default:
             return MaterialPageRoute(
               builder: (_) => const Scaffold(
-                body: Center(child: Text("Route not found")),
+                body: Center(
+                  child: Text('Route not found'),
+                ),
               ),
             );
         }

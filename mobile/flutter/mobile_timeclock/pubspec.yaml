@@ -1,8 +1,8 @@
 name: mobile_timeclock
-description: TimeClock Mobile (v4.0.1)
+description: TimeClock Mobile (v5.0.0)
 publish_to: "none"
 
-version: 4.0.1+401
+version: 5.0.0+5
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

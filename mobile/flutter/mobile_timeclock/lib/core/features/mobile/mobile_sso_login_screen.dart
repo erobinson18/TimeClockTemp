@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 
-//import '../../services/device_config_service.dart';
-import '../../../widgets/logo_header.dart';
-import '../../../widgets/app_background.dart';
 import '../../../main.dart';
-import 'mobile_auth_service.dart';
+import '../../../widgets/app_background.dart';
+import '../../../widgets/logo_header.dart';
+import 'mobile_auth_service_io.dart';
 
 class MobileSsoLoginScreen extends StatefulWidget {
   const MobileSsoLoginScreen({super.key});
@@ -64,7 +63,28 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
     super.dispose();
   }
 
+  double _screenScale(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+
+    if (width < 420) return 0.78;
+    if (width < 700) return 0.88;
+    if (width > 1400) return 1.08;
+
+    return 1.0;
+  }
+
+  double _cardWidth(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+
+    if (width < 520) return width - 32;
+    if (width < 900) return width - 48;
+
+    return 820;
+  }
+
   Future<void> _signIn() async {
+    if (_busy) return;
+
     setState(() {
       _busy = true;
       _errorText = null;
@@ -88,7 +108,7 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
       _statusText = 'Signed in as ${result.email}';
     });
 
-    await Future.delayed(const Duration(milliseconds: 250));
+    await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
 
     Navigator.of(context).pushNamedAndRemoveUntil(
@@ -100,14 +120,18 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
   Widget _banner({
     required String text,
     required bool isError,
+    required double scale,
   }) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(top: 14),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      margin: EdgeInsets.only(top: 14 * scale),
+      padding: EdgeInsets.symmetric(
+        horizontal: 14 * scale,
+        vertical: 12 * scale,
+      ),
       decoration: BoxDecoration(
         color: (isError ? Colors.red : Colors.green).withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16 * scale),
         border: Border.all(
           color:
           (isError ? Colors.red : Colors.green).withValues(alpha: 0.28),
@@ -118,6 +142,7 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
         text,
         style: TextStyle(
           color: Colors.white.withValues(alpha: 0.92),
+          fontSize: 14 * scale,
           fontWeight: FontWeight.w700,
           height: 1.35,
         ),
@@ -125,14 +150,16 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
     );
   }
 
-  Widget _buildCard() {
+  Widget _buildCard(BuildContext context) {
+    final scale = _screenScale(context);
+
     return Container(
-      width: 820,
-      margin: const EdgeInsets.symmetric(vertical: 16),
-      padding: const EdgeInsets.all(28),
+      width: _cardWidth(context),
+      margin: EdgeInsets.symmetric(vertical: 16 * scale),
+      padding: EdgeInsets.all(28 * scale),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.48),
-        borderRadius: BorderRadius.circular(30),
+        color: Colors.black.withValues(alpha: 0.52),
+        borderRadius: BorderRadius.circular(30 * scale),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.14),
           width: 2,
@@ -140,7 +167,7 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.40),
-            blurRadius: 24,
+            blurRadius: 24 * scale,
             spreadRadius: 2,
           ),
         ],
@@ -156,8 +183,8 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
                   borderRadius: BorderRadius.circular(999),
                   onTap: _busy ? null : () => Navigator.of(context).pop(),
                   child: Container(
-                    width: 46,
-                    height: 46,
+                    width: 46 * scale,
+                    height: 46 * scale,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
@@ -169,6 +196,7 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
                     child: Icon(
                       Icons.arrow_back_rounded,
                       color: Colors.white.withValues(alpha: 0.92),
+                      size: 24 * scale,
                     ),
                   ),
                 ),
@@ -176,41 +204,41 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
               const Spacer(),
             ],
           ),
-          const SizedBox(height: 8),
-          const LogoHeader(
+          SizedBox(height: 8 * scale),
+          LogoHeader(
             heightFactor: 0.26,
             padding: EdgeInsets.zero,
-            maxHeight: 200,
-            minHeight: 100,
+            maxHeight: 200 * scale,
+            minHeight: 90 * scale,
           ),
-          const SizedBox(height: 18),
-          const Text(
+          SizedBox(height: 18 * scale),
+          Text(
             'Microsoft Sign-In',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white,
-              fontSize: 34,
+              fontSize: 34 * scale,
               fontWeight: FontWeight.w900,
             ),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: 10 * scale),
           Text(
             'Sign in with your TSG Microsoft 365 account to access the mobile time clock.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.76),
-              fontSize: 16,
+              fontSize: 16 * scale,
               fontWeight: FontWeight.w600,
               height: 1.45,
             ),
           ),
-          const SizedBox(height: 26),
+          SizedBox(height: 26 * scale),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(20),
+            padding: EdgeInsets.all(20 * scale),
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(22 * scale),
               border: Border.all(
                 color: Colors.white.withValues(alpha: 0.12),
                 width: 2,
@@ -221,48 +249,51 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
                 Icon(
                   Icons.business_center_rounded,
                   color: Colors.white.withValues(alpha: 0.90),
-                  size: 42,
+                  size: 42 * scale,
                 ),
-                const SizedBox(height: 12),
-                const Text(
+                SizedBox(height: 12 * scale),
+                Text(
                   'Microsoft 365',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 24,
+                    fontSize: 24 * scale,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(height: 8),
+                SizedBox(height: 8 * scale),
                 Text(
-                  'This will open the secure Microsoft sign-in flow and return directly to the app.',
+                  'This opens the secure Microsoft sign-in flow and returns directly to the app.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.72),
-                    fontSize: 14,
+                    fontSize: 14 * scale,
                     fontWeight: FontWeight.w600,
                     height: 1.35,
                   ),
                 ),
-                const SizedBox(height: 18),
+                SizedBox(height: 18 * scale),
                 SizedBox(
-                  width: 340,
-                  height: 58,
+                  width: 340 * scale,
+                  height: 58 * scale,
                   child: ElevatedButton.icon(
                     onPressed: _busy ? null : _signIn,
                     icon: _busy
-                        ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
+                        ? SizedBox(
+                      width: 18 * scale,
+                      height: 18 * scale,
+                      child: const CircularProgressIndicator(
                         strokeWidth: 2.2,
                         color: Colors.white,
                       ),
                     )
-                        : const Icon(Icons.login_rounded),
+                        : Icon(
+                      Icons.login_rounded,
+                      size: 22 * scale,
+                    ),
                     label: Text(
                       _busy ? 'Signing In...' : 'Sign In with Microsoft',
-                      style: const TextStyle(
-                        fontSize: 16,
+                      style: TextStyle(
+                        fontSize: 16 * scale,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -272,7 +303,7 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
                       disabledBackgroundColor:
                       Colors.red.shade600.withValues(alpha: 0.45),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius: BorderRadius.circular(18 * scale),
                       ),
                     ),
                   ),
@@ -284,11 +315,13 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
             _banner(
               text: _errorText!,
               isError: true,
+              scale: scale,
             ),
           if (_statusText != null)
             _banner(
               text: _statusText!,
               isError: false,
+              scale: scale,
             ),
         ],
       ),
@@ -304,7 +337,7 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
       resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
-          const AppBackground(),
+          const AppBackground(overlayOpacity: 0.68),
           SafeArea(
             child: AnimatedPadding(
               duration: const Duration(milliseconds: 180),
@@ -331,7 +364,7 @@ class _MobileSsoLoginScreenState extends State<MobileSsoLoginScreen>
                           child: ScaleTransition(
                             scale: _scale,
                             child: Center(
-                              child: _buildCard(),
+                              child: _buildCard(context),
                             ),
                           ),
                         ),
